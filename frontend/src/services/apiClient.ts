@@ -39,6 +39,10 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     },
   });
 
+  if (response.status === 204) {
+    return null as T;
+  }
+
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
