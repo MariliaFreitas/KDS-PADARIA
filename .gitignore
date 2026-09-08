@@ -1,0 +1,33 @@
+# Dependências
+node_modules/
+
+# Variáveis de ambiente — nunca versionar.
+# O .env.example de cada pacote é versionado; o .env real, não.
+.env
+.env.*
+!.env.example
+
+# Build
+dist/
+build/
+*.tsbuildinfo
+
+# Testes
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# Editor e sistema operacional
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Prisma
+# ATENÇÃO: prisma/migrations/ DEVE ser versionado — é o histórico do banco.
+# Só os artefatos gerados ficam de fora.
+backend/prisma/generated/
