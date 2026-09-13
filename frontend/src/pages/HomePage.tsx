@@ -30,12 +30,20 @@ export default function HomePage() {
         )}
       </p>
       {user?.role === "ADMIN" && (
-        <Link
-          to="/admin/stations"
-          className="mt-2 rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 transition-colors"
-        >
-          Cadastro de estações
-        </Link>
+        <div className="mt-2 flex flex-wrap justify-center gap-2">
+          <Link
+            to="/admin/stations"
+            className="rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 transition-colors"
+          >
+            Cadastro de estações
+          </Link>
+          <Link
+            to="/admin/products"
+            className="rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 transition-colors"
+          >
+            Cadastro de produtos
+          </Link>
+        </div>
       )}
 
       <button

@@ -19,7 +19,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 3 — Autenticação** (login, JWT, middlewares de autenticação e autorização, tela de login)
 - [x] **Etapa 3.5 — Endurecimento** (contrato de erro com código estável, respostas de erro em JSON, validação do segredo, desacoplamento do health check)
 - [x] **Etapa 4 — Cadastro de estações** (CRUD de estações restrito a ADMIN, tela `/admin/stations`)
-- [ ] Etapa 5 — Cadastro de produtos
+- [x] **Etapa 5 — Cadastro de produtos** (CRUD de produtos restrito a ADMIN, tela `/admin/products`)
 - [ ] Etapa 6 — Cadastro de variações
 - [ ] Etapa 7 — Cadastro de adicionais
 - [ ] Etapa 8 — Criação de pedidos

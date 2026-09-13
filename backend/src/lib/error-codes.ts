@@ -28,8 +28,14 @@ export const ErrorCode = {
   INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
   /** Já existe uma estação com esse nome (Etapa 4). */
   STATION_NAME_ALREADY_EXISTS: "STATION_NAME_ALREADY_EXISTS",
-  /** Estação inexistente (Etapa 4). */
+  /** Estação inexistente (Etapa 4; também usado quando um produto referencia uma estação inexistente na Etapa 5). */
   STATION_NOT_FOUND: "STATION_NOT_FOUND",
+  /** Combinação inválida entre saleType e unitPriceCents/pricePerKgCents (Etapa 5). */
+  PRODUCT_PRICE_FIELDS_INVALID: "PRODUCT_PRICE_FIELDS_INVALID",
+  /** requiresProduction=true sem stationId informado (Etapa 5). */
+  PRODUCT_STATION_REQUIRED: "PRODUCT_STATION_REQUIRED",
+  /** Produto inexistente (Etapa 5). */
+  PRODUCT_NOT_FOUND: "PRODUCT_NOT_FOUND",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
