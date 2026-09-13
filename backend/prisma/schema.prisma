@@ -1,0 +1,291 @@
+// Schema do banco de dados do KDS da Padaria
+// Fonte de verdade: docs/ESPECIFICACAO-PADARIA-V3.md
+//
+// Decisões técnicas tomadas nesta etapa (explicadas na conversa com o usuário):
+// - O status geral do pedido NÃO é uma coluna aqui. Ele é sempre calculado a
+//   partir dos itens ativos (ver seção M/26 da especificação), nunca gravado
+//   diretamente. Isso evita qualquer risco de o banco "esquecer" de atualizar
+//   o status.
+// - "Entrega" é representada por um único campo simples (Order.deliveredAt),
+//   sem criar um novo status — o ponto sobre se isso se aplica também ao
+//   consumo local segue em aberto na especificação.
+// - Pagamento vive como campos dentro do próprio Order (não é uma tabela
+//   separada), por ser a alternativa mais simples para o comportamento
+//   descrito (PENDENTE/PAGO + baixa).
+// - orderNumber é gerado por uma sequência própria do banco (autoincrement
+//   em campo não-chave-primária), nunca contado em memória.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  ATENDENTE
+  PRODUCAO
+  CAIXA
+  ADMIN
+}
+
+enum SaleType {
+  UNIT // vendido por unidade
+  VARIATION // vendido por tamanho/variação
+  WEIGHT // vendido por peso
+}
+
+enum OrderChannel {
+  BALCAO
+  WHATSAPP
+}
+
+enum ConsumptionType {
+  LOCAL
+  VIAGEM
+}
+
+enum PaymentStatus {
+  PENDENTE
+  PAGO
+}
+
+enum OrderItemStatus {
+  PENDENTE
+  EM_PREPARO
+  PRONTO
+  CANCELADO
+}
+
+// ---------------------------------------------------------------------------
+// Usuários
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  username     String   @unique
+  passwordHash String
+  role         UserRole
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  ordersCreated   Order[]        @relation("OrderCreatedBy")
+  ordersPaid      Order[]        @relation("OrderPaidBy")
+  ordersCancelled Order[]        @relation("OrderCancelledBy")
+  historyEntries  OrderHistory[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Cadastro: estações, produtos, variações, adicionais
+// ---------------------------------------------------------------------------
+
+model Station {
+  id     String  @id @default(uuid())
+  name   String  @unique
+  active Boolean @default(true)
+
+  products   Product[]   @relation("ProductStation")
+  orderItems OrderItem[] @relation("OrderItemStationSnapshot")
+
+  @@map("stations")
+}
+
+model Product {
+  id        String   @id @default(uuid())
+  name      String
+  active    Boolean  @default(true)
+  available Boolean  @default(true)
+  saleType  SaleType
+
+  // Preenchido apenas quando saleType = UNIT
+  unitPriceCents Int?
+
+  // Preenchido apenas quando saleType = WEIGHT
+  pricePerKgCents Int?
+
+  // Se true, o produto precisa de uma estação (validado na aplicação, não no banco)
+  requiresProduction Boolean @default(false)
+  stationId          String?
+  station            Station? @relation("ProductStation", fields: [stationId], references: [id])
+
+  variations ProductVariation[]
+  orderItems OrderItem[]
+
+  createdAt DateTime @default(now())
+
+  @@map("products")
+}
+
+model ProductVariation {
+  id         String @id @default(uuid())
+  productId  String
+  product    Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name       String
+  priceCents Int
+
+  orderItems OrderItem[]
+
+  @@map("product_variations")
+}
+
+model Additional {
+  id         String  @id @default(uuid())
+  name       String
+  priceCents Int
+  active     Boolean @default(true)
+
+  orderItemAdditionals OrderItemAdditional[]
+
+  @@map("additionals")
+}
+
+// ---------------------------------------------------------------------------
+// Pedido e itens
+// ---------------------------------------------------------------------------
+
+model Order {
+  id String @id @default(uuid())
+
+  // Número simples para uso humano (ex: #154). Gerado pelo próprio banco,
+  // nunca contado em memória — evita duplicidade em pico de pedidos.
+  orderNumber Int @unique @default(autoincrement())
+
+  customerName    String
+  channel         OrderChannel
+  consumptionType ConsumptionType
+  pickupTime      DateTime?
+
+  // Pagamento — independente do andamento operacional do pedido.
+  paymentStatus PaymentStatus @default(PENDENTE)
+  paidAt        DateTime?
+  paidByUserId  String?
+  paidBy        User?         @relation("OrderPaidBy", fields: [paidByUserId], references: [id])
+
+  // Cancelamento do pedido inteiro (distinto de cancelar um item).
+  cancelledAt       DateTime?
+  cancelReason      String?
+  cancelledByUserId String?
+  cancelledBy       User?     @relation("OrderCancelledBy", fields: [cancelledByUserId], references: [id])
+
+  // Marca simples de entrega/retirada concluída (ver nota no topo do arquivo).
+  deliveredAt DateTime?
+
+  createdByUserId String
+  createdBy       User     @relation("OrderCreatedBy", fields: [createdByUserId], references: [id])
+  createdAt       DateTime @default(now())
+
+  items             OrderItem[]
+  history           OrderHistory[]
+  pickupInformation PickupInformation?
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  // "Fotografia" dos dados comerciais no momento da inclusão do item —
+  // preserva o pedido antigo mesmo que o cadastro do produto mude depois.
+  productNameSnapshot     String
+  saleType                SaleType
+  // Preço-base congelado: preço unitário (UNIT), preço por kg (WEIGHT),
+  // ou preço da variação selecionada (VARIATION) — depende de saleType.
+  basePriceCentsSnapshot  Int
+  requiresProductionSnapshot Boolean
+
+  // Preenchido conforme a forma de venda (validado na aplicação):
+  quantity   Int? // UNIT / VARIATION
+  weightGrams Int? // WEIGHT — sempre em gramas inteiras
+
+  variationId            String?
+  variation              ProductVariation? @relation(fields: [variationId], references: [id])
+  variationNameSnapshot  String?
+
+  stationIdSnapshot   String?
+  stationNameSnapshot String?
+  station             Station? @relation("OrderItemStationSnapshot", fields: [stationIdSnapshot], references: [id])
+
+  status  OrderItemStatus @default(PENDENTE)
+  totalCents Int // preço base + adicionais, já calculado no momento da inclusão
+
+  observation String?
+  includedAt  DateTime @default(now())
+
+  additionals    OrderItemAdditional[]
+  historyEntries OrderHistory[]
+
+  @@map("order_items")
+}
+
+model OrderItemAdditional {
+  id          String    @id @default(uuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  additionalId String
+  additional   Additional @relation(fields: [additionalId], references: [id])
+
+  // Snapshot: preço do adicional no momento da inclusão.
+  nameSnapshot       String
+  priceCentsSnapshot Int
+  quantity           Int
+
+  @@map("order_item_additionals")
+}
+
+// ---------------------------------------------------------------------------
+// Histórico e retirada
+// ---------------------------------------------------------------------------
+
+model OrderHistory {
+  id String @id @default(uuid())
+
+  orderId     String
+  order       Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItemId String?
+  orderItem   OrderItem? @relation(fields: [orderItemId], references: [id])
+
+  // Texto livre e curto, ex: "ITEM_CANCELLED", "ORDER_CANCELLED",
+  // "ITEM_ADDED", "ITEM_STATUS_CHANGED", "PAYMENT_CONFIRMED".
+  action String
+
+  previousState String?
+  newState      String?
+  reason        String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@map("order_history")
+}
+
+model PickupInformation {
+  id      String @id @default(uuid())
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  pickupPersonName   String?
+  pickupPersonDetail String?
+  driverName         String?
+  plate              String?
+  vehicleColor       String?
+  code               String?
+
+  @@map("pickup_information")
+}
