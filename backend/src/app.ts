@@ -3,6 +3,7 @@ import cors from "cors";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { stationsRouter } from "./modules/stations/station.routes.js";
 import { productsRouter } from "./modules/products/product.routes.js";
+import { productVariationsRouter } from "./modules/product-variations/product-variation.routes.js";
 import { notFoundHandler } from "./middlewares/notFoundHandler.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
@@ -20,6 +21,7 @@ export function createApp(corsOrigin: string) {
   app.use("/api/auth", authRouter);
   app.use("/api/stations", stationsRouter);
   app.use("/api/products", productsRouter);
+  app.use("/api/products/:productId/variations", productVariationsRouter);
 
   // Os dois abaixo são sempre os últimos, nesta ordem.
   app.use(notFoundHandler);

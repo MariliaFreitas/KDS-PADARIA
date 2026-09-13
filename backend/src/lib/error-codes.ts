@@ -36,6 +36,10 @@ export const ErrorCode = {
   PRODUCT_STATION_REQUIRED: "PRODUCT_STATION_REQUIRED",
   /** Produto inexistente (Etapa 5). */
   PRODUCT_NOT_FOUND: "PRODUCT_NOT_FOUND",
+  /** Produto existe, mas saleType não é VARIATION (Etapa 6). */
+  PRODUCT_DOES_NOT_ACCEPT_VARIATIONS: "PRODUCT_DOES_NOT_ACCEPT_VARIATIONS",
+  /** Variação inexistente, ou existente mas de outro produto (Etapa 6). */
+  PRODUCT_VARIATION_NOT_FOUND: "PRODUCT_VARIATION_NOT_FOUND",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

@@ -5,6 +5,7 @@ import LoginPage from "./features/auth/LoginPage.js";
 import HomePage from "./pages/HomePage.js";
 import StationsPage from "./features/stations/StationsPage.js";
 import ProductsPage from "./features/products/ProductsPage.js";
+import ProductVariationsPage from "./features/product-variations/ProductVariationsPage.js";
 
 export default function App() {
   return (
@@ -33,6 +34,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["ADMIN"]}>
                 <ProductsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/products/:productId/variations"
+            element={
+              <ProtectedRoute allowedRoles={["ADMIN"]}>
+                <ProductVariationsPage />
               </ProtectedRoute>
             }
           />

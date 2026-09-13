@@ -449,6 +449,14 @@ export default function ProductsPage() {
                   >
                     Editar
                   </button>
+                  {product.saleType === "VARIATION" && (
+                    <Link
+                      to={`/admin/products/${product.id}/variations`}
+                      className="text-sm rounded-lg border border-neutral-700 px-3 py-1.5 hover:bg-neutral-800 transition-colors"
+                    >
+                      Gerenciar variações
+                    </Link>
+                  )}
                   <button
                     type="button"
                     onClick={() => handleToggleActive(product)}

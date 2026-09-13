@@ -20,7 +20,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 3.5 — Endurecimento** (contrato de erro com código estável, respostas de erro em JSON, validação do segredo, desacoplamento do health check)
 - [x] **Etapa 4 — Cadastro de estações** (CRUD de estações restrito a ADMIN, tela `/admin/stations`)
 - [x] **Etapa 5 — Cadastro de produtos** (CRUD de produtos restrito a ADMIN, tela `/admin/products`)
-- [ ] Etapa 6 — Cadastro de variações
+- [x] **Etapa 6 — Cadastro de variações** (CRUD de variações de produtos VARIATION, restrito a ADMIN, tela `/admin/products/:productId/variations`)
 - [ ] Etapa 7 — Cadastro de adicionais
 - [ ] Etapa 8 — Criação de pedidos
 - [ ] Etapa 9 — Adição de itens
