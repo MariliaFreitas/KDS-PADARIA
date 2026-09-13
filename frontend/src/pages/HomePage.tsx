@@ -43,6 +43,12 @@ export default function HomePage() {
           >
             Cadastro de produtos
           </Link>
+          <Link
+            to="/admin/additionals"
+            className="rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 transition-colors"
+          >
+            Cadastro de adicionais
+          </Link>
         </div>
       )}
 

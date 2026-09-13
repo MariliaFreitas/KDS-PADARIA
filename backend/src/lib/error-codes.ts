@@ -40,6 +40,8 @@ export const ErrorCode = {
   PRODUCT_DOES_NOT_ACCEPT_VARIATIONS: "PRODUCT_DOES_NOT_ACCEPT_VARIATIONS",
   /** Variação inexistente, ou existente mas de outro produto (Etapa 6). */
   PRODUCT_VARIATION_NOT_FOUND: "PRODUCT_VARIATION_NOT_FOUND",
+  /** Adicional inexistente (Etapa 7). */
+  ADDITIONAL_NOT_FOUND: "ADDITIONAL_NOT_FOUND",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
