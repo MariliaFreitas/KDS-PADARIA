@@ -18,7 +18,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 2 — Banco de dados** (schema Prisma, seed do usuário administrador)
 - [x] **Etapa 3 — Autenticação** (login, JWT, middlewares de autenticação e autorização, tela de login)
 - [x] **Etapa 3.5 — Endurecimento** (contrato de erro com código estável, respostas de erro em JSON, validação do segredo, desacoplamento do health check)
-- [ ] Etapa 4 — Cadastro de estações
+- [x] **Etapa 4 — Cadastro de estações** (CRUD de estações restrito a ADMIN, tela `/admin/stations`)
 - [ ] Etapa 5 — Cadastro de produtos
 - [ ] Etapa 6 — Cadastro de variações
 - [ ] Etapa 7 — Cadastro de adicionais

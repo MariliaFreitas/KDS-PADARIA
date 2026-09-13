@@ -3,6 +3,7 @@ import { AuthProvider } from "./features/auth/AuthContext.js";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute.js";
 import LoginPage from "./features/auth/LoginPage.js";
 import HomePage from "./pages/HomePage.js";
+import StationsPage from "./features/stations/StationsPage.js";
 
 export default function App() {
   return (
@@ -15,6 +16,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <HomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/stations"
+            element={
+              <ProtectedRoute allowedRoles={["ADMIN"]}>
+                <StationsPage />
               </ProtectedRoute>
             }
           />

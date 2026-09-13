@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { authRouter } from "./modules/auth/auth.routes.js";
+import { stationsRouter } from "./modules/stations/station.routes.js";
 import { notFoundHandler } from "./middlewares/notFoundHandler.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
@@ -16,6 +17,7 @@ export function createApp(corsOrigin: string) {
 
   // Rotas da aplicação. Toda rota nova entra ACIMA do notFoundHandler.
   app.use("/api/auth", authRouter);
+  app.use("/api/stations", stationsRouter);
 
   // Os dois abaixo são sempre os últimos, nesta ordem.
   app.use(notFoundHandler);

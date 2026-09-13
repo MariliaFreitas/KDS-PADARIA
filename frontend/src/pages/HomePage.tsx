@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../features/auth/AuthContext.js";
 
 type HealthStatus = "checking" | "ok" | "error";
@@ -28,6 +29,15 @@ export default function HomePage() {
           <span className="text-red-400">não foi possível conectar</span>
         )}
       </p>
+      {user?.role === "ADMIN" && (
+        <Link
+          to="/admin/stations"
+          className="mt-2 rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 transition-colors"
+        >
+          Cadastro de estações
+        </Link>
+      )}
+
       <button
         onClick={logout}
         className="mt-4 rounded-lg border border-neutral-700 px-4 py-2 text-sm hover:bg-neutral-800 transition-colors"

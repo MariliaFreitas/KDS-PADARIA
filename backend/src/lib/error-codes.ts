@@ -26,6 +26,10 @@ export const ErrorCode = {
   FORBIDDEN: "FORBIDDEN",
   /** Usuário/senha inválidos, ou usuário inativo. */
   INVALID_CREDENTIALS: "INVALID_CREDENTIALS",
+  /** Já existe uma estação com esse nome (Etapa 4). */
+  STATION_NAME_ALREADY_EXISTS: "STATION_NAME_ALREADY_EXISTS",
+  /** Estação inexistente (Etapa 4). */
+  STATION_NOT_FOUND: "STATION_NOT_FOUND",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
