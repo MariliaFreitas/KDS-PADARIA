@@ -101,7 +101,8 @@ describe("order.service", () => {
 
   describe("getOrderById", () => {
     it("retorna o pedido com items (vazio nesta etapa)", async () => {
-      vi.mocked(prisma.order.findUnique).mockResolvedValue({ ...baseOrder, items: [] });
+      const orderWithItems = { ...baseOrder, items: [] };
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(orderWithItems);
 
       const result = await getOrderById("order-1");
 
