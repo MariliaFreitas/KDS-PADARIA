@@ -42,6 +42,8 @@ export const ErrorCode = {
   PRODUCT_VARIATION_NOT_FOUND: "PRODUCT_VARIATION_NOT_FOUND",
   /** Adicional inexistente (Etapa 7). */
   ADDITIONAL_NOT_FOUND: "ADDITIONAL_NOT_FOUND",
+  /** Pedido inexistente (Etapa 8). */
+  ORDER_NOT_FOUND: "ORDER_NOT_FOUND",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

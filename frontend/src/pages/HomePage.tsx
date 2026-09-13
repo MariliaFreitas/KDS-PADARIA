@@ -29,6 +29,15 @@ export default function HomePage() {
           <span className="text-red-400">não foi possível conectar</span>
         )}
       </p>
+      {(user?.role === "ATENDENTE" || user?.role === "ADMIN") && (
+        <Link
+          to="/orders/new"
+          className="mt-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-6 py-3 text-base transition-colors"
+        >
+          Novo pedido
+        </Link>
+      )}
+
       {user?.role === "ADMIN" && (
         <div className="mt-2 flex flex-wrap justify-center gap-2">
           <Link

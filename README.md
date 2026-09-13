@@ -22,7 +22,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 5 — Cadastro de produtos** (CRUD de produtos restrito a ADMIN, tela `/admin/products`)
 - [x] **Etapa 6 — Cadastro de variações** (CRUD de variações de produtos VARIATION, restrito a ADMIN, tela `/admin/products/:productId/variations`)
 - [x] **Etapa 7 — Cadastro de adicionais** (CRUD de adicionais globais restrito a ADMIN, tela `/admin/additionals`)
-- [ ] Etapa 8 — Criação de pedidos
+- [x] **Etapa 8 — Criação de pedidos** (cabeçalho do pedido: `POST/GET /api/orders`, restrito a ATENDENTE/ADMIN, tela `/orders/new` e `/orders/:orderId`; itens do pedido entram na Etapa 9)
 - [ ] Etapa 9 — Adição de itens
 - [ ] Etapa 10 — Cálculo de preços
 - [ ] Etapa 11 — Roteamento para estações
