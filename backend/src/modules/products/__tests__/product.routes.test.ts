@@ -32,11 +32,12 @@ const baseProduct = {
   name: "Pão francês",
   active: true,
   available: true,
-  saleType: "UNIT",
+  saleType: "UNIT" as const,
   unitPriceCents: 50,
   pricePerKgCents: null,
   requiresProduction: false,
   stationId: null,
+  createdAt: new Date("2026-01-01T00:00:00.000Z"),
   station: null,
 };
 
