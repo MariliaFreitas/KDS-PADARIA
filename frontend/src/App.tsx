@@ -9,6 +9,7 @@ import ProductVariationsPage from "./features/product-variations/ProductVariatio
 import AdditionalsPage from "./features/additionals/AdditionalsPage.js";
 import NewOrderPage from "./features/orders/NewOrderPage.js";
 import OrderPage from "./features/orders/OrderPage.js";
+import AddItemPage from "./features/orders/AddItemPage.js";
 
 export default function App() {
   return (
@@ -61,6 +62,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["ATENDENTE", "ADMIN"]}>
                 <NewOrderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/orders/:orderId/items/new"
+            element={
+              <ProtectedRoute allowedRoles={["ATENDENTE", "ADMIN"]}>
+                <AddItemPage />
               </ProtectedRoute>
             }
           />

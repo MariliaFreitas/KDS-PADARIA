@@ -310,6 +310,51 @@ describe("/api/orders", () => {
       expect(response.body.items).toEqual([]);
     });
 
+    it("retorna os itens do pedido, cada um com seus additionals (Etapa 9)", async () => {
+      const itemWithAdditionals = {
+        id: "item-1",
+        orderId: "order-1",
+        productId: "product-1",
+        productNameSnapshot: "Pão francês",
+        saleType: "UNIT",
+        basePriceCentsSnapshot: 500,
+        requiresProductionSnapshot: false,
+        quantity: 2,
+        weightGrams: null,
+        variationId: null,
+        variationNameSnapshot: null,
+        stationIdSnapshot: null,
+        stationNameSnapshot: null,
+        status: "PENDENTE",
+        totalCents: 1000,
+        observation: null,
+        includedAt: "2026-01-01T10:00:00.000Z",
+        additionals: [
+          {
+            id: "add-1",
+            orderItemId: "item-1",
+            additionalId: "additional-1",
+            nameSnapshot: "Manteiga",
+            priceCentsSnapshot: 150,
+            quantity: 1,
+          },
+        ],
+      };
+      vi.mocked(orderService.getOrderById).mockResolvedValue({
+        ...baseOrder,
+        items: [itemWithAdditionals],
+      } as never);
+
+      const response = await request(app)
+        .get("/api/orders/order-1")
+        .set("Authorization", `Bearer ${atendenteToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.items).toHaveLength(1);
+      expect(response.body.items[0].additionals).toHaveLength(1);
+      expect(response.body.items[0].additionals[0].nameSnapshot).toBe("Manteiga");
+    });
+
     it("retorna 404 ORDER_NOT_FOUND para pedido inexistente", async () => {
       vi.mocked(orderService.getOrderById).mockRejectedValue(
         new AppError("Pedido não encontrado.", 404, ErrorCode.ORDER_NOT_FOUND),

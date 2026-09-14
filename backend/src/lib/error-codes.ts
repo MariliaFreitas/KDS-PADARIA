@@ -44,6 +44,16 @@ export const ErrorCode = {
   ADDITIONAL_NOT_FOUND: "ADDITIONAL_NOT_FOUND",
   /** Pedido inexistente (Etapa 8). */
   ORDER_NOT_FOUND: "ORDER_NOT_FOUND",
+  /** Pedido existe, mas está cancelado ou já entregue — não aceita item novo (Etapa 9). */
+  ORDER_NOT_OPEN: "ORDER_NOT_OPEN",
+  /** Produto existe, mas active=false ou available=false (Etapa 9). */
+  PRODUCT_NOT_AVAILABLE: "PRODUCT_NOT_AVAILABLE",
+  /** Produto vendável, mas com cadastro inconsistente para o saleType (preço-base ausente) (Etapa 9). */
+  PRODUCT_CONFIGURATION_INVALID: "PRODUCT_CONFIGURATION_INVALID",
+  /** Adicional existe, mas active=false (Etapa 9). */
+  ADDITIONAL_NOT_AVAILABLE: "ADDITIONAL_NOT_AVAILABLE",
+  /** Corpo de inclusão de item com combinação de campos inválida para o saleType (Etapa 9). */
+  ORDER_ITEM_INPUT_INVALID: "ORDER_ITEM_INPUT_INVALID",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

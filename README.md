@@ -23,8 +23,8 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 6 — Cadastro de variações** (CRUD de variações de produtos VARIATION, restrito a ADMIN, tela `/admin/products/:productId/variations`)
 - [x] **Etapa 7 — Cadastro de adicionais** (CRUD de adicionais globais restrito a ADMIN, tela `/admin/additionals`)
 - [x] **Etapa 8 — Criação de pedidos** (cabeçalho do pedido: `POST/GET /api/orders`, restrito a ATENDENTE/ADMIN, tela `/orders/new` e `/orders/:orderId`; itens do pedido entram na Etapa 9)
-- [ ] Etapa 9 — Adição de itens
-- [ ] Etapa 10 — Cálculo de preços
+- [x] **Etapa 9 — Adição de itens** (`POST /api/orders/:orderId/items`, `GET /api/orders/catalog`, tela `/orders/:orderId/items/new`, restrito a ATENDENTE/ADMIN)
+- [x] **Etapa 10 — Cálculo de preços** (implementada junto da Etapa 9: `OrderItem` exige `basePriceCentsSnapshot`/`totalCents` já congelados na criação, então preço e item nascem juntos — snapshots de produto/variação/adicionais e total em centavos calculado no servidor)
 - [ ] Etapa 11 — Roteamento para estações
 - [ ] Etapa 12 — KDS (produção)
 - [ ] Etapa 13 — Caixa

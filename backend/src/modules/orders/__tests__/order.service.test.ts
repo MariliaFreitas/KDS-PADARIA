@@ -100,7 +100,7 @@ describe("order.service", () => {
   });
 
   describe("getOrderById", () => {
-    it("retorna o pedido com items (vazio nesta etapa)", async () => {
+    it("retorna o pedido sem itens (pedido novo, antes da Etapa 9 adicionar algum)", async () => {
       const orderWithItems = { ...baseOrder, items: [] };
       vi.mocked(prisma.order.findUnique).mockResolvedValue(orderWithItems);
 
@@ -108,9 +108,54 @@ describe("order.service", () => {
 
       expect(prisma.order.findUnique).toHaveBeenCalledWith({
         where: { id: "order-1" },
-        include: { items: true },
+        include: {
+          items: {
+            orderBy: { includedAt: "asc" },
+            include: { additionals: true },
+          },
+        },
       });
       expect(result.items).toEqual([]);
+    });
+
+    it("retorna os itens reais ordenados por includedAt, cada um com seus additionals", async () => {
+      const item1 = {
+        id: "item-1",
+        orderId: "order-1",
+        productId: "product-1",
+        productNameSnapshot: "Pão francês",
+        saleType: "UNIT" as const,
+        basePriceCentsSnapshot: 500,
+        requiresProductionSnapshot: false,
+        quantity: 2,
+        weightGrams: null,
+        variationId: null,
+        variationNameSnapshot: null,
+        stationIdSnapshot: null,
+        stationNameSnapshot: null,
+        status: "PENDENTE" as const,
+        totalCents: 1000,
+        observation: null,
+        includedAt: new Date("2026-01-01T10:00:00.000Z"),
+        additionals: [
+          {
+            id: "add-1",
+            orderItemId: "item-1",
+            additionalId: "additional-1",
+            nameSnapshot: "Manteiga",
+            priceCentsSnapshot: 150,
+            quantity: 1,
+          },
+        ],
+      };
+      const orderWithItems = { ...baseOrder, items: [item1] };
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(orderWithItems);
+
+      const result = await getOrderById("order-1");
+
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].additionals).toHaveLength(1);
+      expect(result.items[0].additionals[0].nameSnapshot).toBe("Manteiga");
     });
 
     it("rejeita pedido inexistente com 404 ORDER_NOT_FOUND", async () => {

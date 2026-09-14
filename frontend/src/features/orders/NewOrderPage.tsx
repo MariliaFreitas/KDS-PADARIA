@@ -57,7 +57,9 @@ export default function NewOrderPage() {
         pickupTime: pickupTimeIso,
       });
 
-      navigate(`/orders/${order.id}`);
+      // Em vez de parar numa tela de pedido praticamente vazia, o
+      // atendente já cai direto na inclusão do primeiro item.
+      navigate(`/orders/${order.id}/items/new`);
     } catch (err) {
       setError(errorMessage(err));
     } finally {

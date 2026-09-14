@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.js";
 import { ApiError } from "../../services/apiClient.js";
 import { getOrder } from "./ordersService.js";
-import type { ConsumptionType, OrderChannel, OrderWithItems } from "./types.js";
+import type { ConsumptionType, OrderChannel, OrderItem, OrderWithItems } from "./types.js";
 
 const CHANNEL_LABEL: Record<OrderChannel, string> = {
   BALCAO: "Balcão",
@@ -14,6 +14,51 @@ const CONSUMPTION_LABEL: Record<ConsumptionType, string> = {
   LOCAL: "Local",
   VIAGEM: "Viagem",
 };
+
+function formatBRL(cents: number): string {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
+    cents / 100,
+  );
+}
+
+function itemQuantityLabel(item: OrderItem): string {
+  if (item.saleType === "WEIGHT") {
+    return `${item.weightGrams} g`;
+  }
+  return `${item.quantity}x`;
+}
+
+function ItemRow({ item }: { item: OrderItem }) {
+  return (
+    <div className="py-3 space-y-1">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-neutral-100">
+          {itemQuantityLabel(item)} {item.productNameSnapshot}
+          {item.variationNameSnapshot && (
+            <span className="text-neutral-400"> — {item.variationNameSnapshot}</span>
+          )}
+        </span>
+        <span className="text-neutral-200 whitespace-nowrap">{formatBRL(item.totalCents)}</span>
+      </div>
+
+      {item.additionals.map((additional) => (
+        <div key={additional.id} className="flex items-baseline justify-between gap-3 pl-4">
+          <span className="text-sm text-neutral-400">
+            + {additional.quantity > 1 ? `${additional.quantity}x ` : ""}
+            {additional.nameSnapshot}
+          </span>
+          <span className="text-sm text-neutral-500 whitespace-nowrap">
+            {formatBRL(additional.priceCentsSnapshot * additional.quantity)}
+          </span>
+        </div>
+      ))}
+
+      {item.observation && (
+        <p className="text-sm text-neutral-500 pl-4">Obs: {item.observation}</p>
+      )}
+    </div>
+  );
+}
 
 export default function OrderPage() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -51,9 +96,9 @@ export default function OrderPage() {
   }, [token, orderId]);
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100 px-4 py-10 flex items-center justify-center">
-      <div className="max-w-sm w-full space-y-6 text-center">
-        {loading && <p className="text-neutral-400">Carregando...</p>}
+    <div className="min-h-screen bg-neutral-950 text-neutral-100 px-4 py-10">
+      <div className="max-w-md mx-auto space-y-6">
+        {loading && <p className="text-neutral-400 text-center">Carregando...</p>}
 
         {!loading && error && (
           <p
@@ -66,31 +111,38 @@ export default function OrderPage() {
 
         {!loading && !error && order && (
           <>
-            <h1 className="text-3xl font-semibold">Pedido #{order.orderNumber}</h1>
-            <p className="text-xl text-neutral-200">{order.customerName}</p>
-            <p className="text-neutral-400">
-              {CHANNEL_LABEL[order.channel]} • {CONSUMPTION_LABEL[order.consumptionType]}
-            </p>
+            <div>
+              <h1 className="text-2xl font-semibold">Pedido #{order.orderNumber}</h1>
+              <p className="text-neutral-300">{order.customerName}</p>
+              <p className="text-sm text-neutral-500">
+                {CHANNEL_LABEL[order.channel]} • {CONSUMPTION_LABEL[order.consumptionType]}
+              </p>
+            </div>
 
-            <p className="text-sm text-neutral-400 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
-              Pedido criado. Na próxima etapa você poderá adicionar os itens.
-            </p>
-
-            <button
-              type="button"
-              disabled
-              title="Disponível na próxima etapa"
-              className="w-full rounded-xl border border-neutral-800 text-neutral-600 font-medium px-4 py-3 cursor-not-allowed"
-            >
-              Adicionar item (em breve)
-            </button>
+            {order.items.length === 0 ? (
+              <p className="text-sm text-neutral-400 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
+                Nenhum item adicionado ainda.
+              </p>
+            ) : (
+              <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 divide-y divide-neutral-800">
+                {order.items.map((item) => (
+                  <ItemRow key={item.id} item={item} />
+                ))}
+              </div>
+            )}
 
             <Link
-              to="/"
-              className="inline-block rounded-xl border border-neutral-700 px-4 py-3 text-sm hover:bg-neutral-800 transition-colors"
+              to={`/orders/${order.id}/items/new`}
+              className="block w-full text-center rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-4 transition-colors"
             >
-              Voltar
+              + Adicionar outro item
             </Link>
+
+            <div className="text-center">
+              <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
+                Voltar
+              </Link>
+            </div>
           </>
         )}
       </div>
