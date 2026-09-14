@@ -192,6 +192,9 @@ describe("POST /api/orders/:orderId/items", () => {
         includedAt: "2020-01-01T00:00:00.000Z",
         stationIdSnapshot: "forjado",
         requiresProductionSnapshot: true,
+        stationId: "forjado",
+        stationName: "Estação forjada",
+        stationNameSnapshot: "forjado",
       });
 
     const call = vi.mocked(orderItemService.addOrderItem).mock.calls[0][1];
@@ -202,6 +205,9 @@ describe("POST /api/orders/:orderId/items", () => {
     expect(call).not.toHaveProperty("includedAt");
     expect(call).not.toHaveProperty("stationIdSnapshot");
     expect(call).not.toHaveProperty("requiresProductionSnapshot");
+    expect(call).not.toHaveProperty("stationId");
+    expect(call).not.toHaveProperty("stationName");
+    expect(call).not.toHaveProperty("stationNameSnapshot");
   });
 
   it("mapeia ORDER_NOT_FOUND do service para 404", async () => {

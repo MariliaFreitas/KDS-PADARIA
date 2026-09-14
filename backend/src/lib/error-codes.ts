@@ -54,6 +54,10 @@ export const ErrorCode = {
   ADDITIONAL_NOT_AVAILABLE: "ADDITIONAL_NOT_AVAILABLE",
   /** Corpo de inclusão de item com combinação de campos inválida para o saleType (Etapa 9). */
   ORDER_ITEM_INPUT_INVALID: "ORDER_ITEM_INPUT_INVALID",
+  /** Produto exige produção, mas não tem estação configurada (stationId ausente ou relação inexistente) (Etapa 11). */
+  PRODUCT_ROUTING_INVALID: "PRODUCT_ROUTING_INVALID",
+  /** Estação existe, mas está inativa — bloqueia roteamento de item novo e cadastro/edição de produto (Etapa 11). */
+  STATION_NOT_AVAILABLE: "STATION_NOT_AVAILABLE",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

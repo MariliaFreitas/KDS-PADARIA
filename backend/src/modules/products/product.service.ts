@@ -135,12 +135,28 @@ function resolveProductionFields(
   return { requiresProduction: true, stationId };
 }
 
+/**
+ * Um produto que exige produção não pode apontar para uma estação
+ * inexistente nem para uma estação inativa — isso vale tanto para criar
+ * quanto para atualizar o produto, incluindo trocar de estação ou ligar
+ * requiresProduction num produto que já tinha uma estação "esquecida"
+ * (Etapa 11). Desativar uma estação continua permitido mesmo com
+ * produtos vinculados a ela: quem fica bloqueado é o cadastro/edição de
+ * produto que tentar usá-la, não a desativação em si.
+ */
 async function assertStationExists(stationId: string | null): Promise<void> {
   if (!stationId) return;
 
   const station = await prisma.station.findUnique({ where: { id: stationId } });
   if (!station) {
     throw new AppError("Estação não encontrada.", 404, ErrorCode.STATION_NOT_FOUND);
+  }
+  if (!station.active) {
+    throw new AppError(
+      "A estação configurada está inativa.",
+      400,
+      ErrorCode.STATION_NOT_AVAILABLE,
+    );
   }
 }
 

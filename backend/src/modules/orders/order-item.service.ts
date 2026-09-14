@@ -164,6 +164,54 @@ async function resolveSaleTypeFields(
   };
 }
 
+interface ResolvedProductionRoute {
+  requiresProductionSnapshot: boolean;
+  stationIdSnapshot: string | null;
+  stationNameSnapshot: string | null;
+}
+
+/**
+ * O roteamento para estação é sempre derivado do cadastro atual do
+ * produto — nunca do corpo da requisição ou do frontend (Etapa 11).
+ *
+ * Produto sem produção nunca recebe estação no item, mesmo que sobre
+ * algum stationId inconsistente no cadastro: a regra é requiresProduction,
+ * não a mera presença de stationId. Produto com produção exige uma
+ * estação configurada e ativa; sem isso o item não é criado — nada de
+ * estação padrão, primeira disponível ou preenchimento artificial.
+ */
+function resolveProductionRoute(product: ProductWithStation): ResolvedProductionRoute {
+  if (!product.requiresProduction) {
+    return {
+      requiresProductionSnapshot: false,
+      stationIdSnapshot: null,
+      stationNameSnapshot: null,
+    };
+  }
+
+  if (!product.stationId || !product.station) {
+    throw new AppError(
+      "Produto exige produção, mas não possui uma estação válida configurada.",
+      400,
+      ErrorCode.PRODUCT_ROUTING_INVALID,
+    );
+  }
+
+  if (!product.station.active) {
+    throw new AppError(
+      "A estação configurada para este produto está inativa.",
+      400,
+      ErrorCode.STATION_NOT_AVAILABLE,
+    );
+  }
+
+  return {
+    requiresProductionSnapshot: true,
+    stationIdSnapshot: product.station.id,
+    stationNameSnapshot: product.station.name,
+  };
+}
+
 interface ResolvedAdditional {
   additionalId: string;
   nameSnapshot: string;
@@ -211,9 +259,12 @@ async function resolveAdditionals(
 /**
  * Adiciona um item ao pedido (Etapas 9+10 juntas: OrderItem exige preço e
  * total já congelados na criação, então não dá para separar "criar item"
- * de "calcular preço"). Item e seus OrderItemAdditional são criados de
+ * de "calcular preço"). Sequência: pedido aberto -> produto vendável ->
+ * forma de venda -> adicionais -> roteamento para estação (Etapa 11) ->
+ * total -> persistência. Item e seus OrderItemAdditional são criados de
  * forma atômica via nested create do Prisma — nada é persistido se
- * qualquer validação de produto/variação/adicional falhar antes.
+ * qualquer validação de produto/variação/adicional/roteamento falhar
+ * antes.
  */
 export async function addOrderItem(
   orderId: string,
@@ -226,6 +277,7 @@ export async function addOrderItem(
   const { additionals, subtotalCents: additionalsSubtotalCents } = await resolveAdditionals(
     input.additionals,
   );
+  const productionRoute = resolveProductionRoute(product);
 
   const totalCents = saleTypeFields.subtotalBaseCents + additionalsSubtotalCents;
 
@@ -236,13 +288,13 @@ export async function addOrderItem(
       productNameSnapshot: product.name,
       saleType: product.saleType,
       basePriceCentsSnapshot: saleTypeFields.basePriceCentsSnapshot,
-      requiresProductionSnapshot: product.requiresProduction,
+      requiresProductionSnapshot: productionRoute.requiresProductionSnapshot,
       quantity: saleTypeFields.quantity,
       weightGrams: saleTypeFields.weightGrams,
       variationId: saleTypeFields.variationId,
       variationNameSnapshot: saleTypeFields.variationNameSnapshot,
-      stationIdSnapshot: product.stationId,
-      stationNameSnapshot: product.station?.name ?? null,
+      stationIdSnapshot: productionRoute.stationIdSnapshot,
+      stationNameSnapshot: productionRoute.stationNameSnapshot,
       totalCents,
       observation: input.observation,
       additionals: {

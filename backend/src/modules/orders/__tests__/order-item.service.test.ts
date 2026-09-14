@@ -566,4 +566,98 @@ describe("order-item.service", () => {
       });
     });
   });
+
+  describe("roteamento para estação", () => {
+    it("produto sem produção nunca roteia, mesmo com stationId residual/inconsistente", async () => {
+      const productWithResidualStation = {
+        ...unitProduct,
+        requiresProduction: false,
+        stationId: "station-residual",
+        station: { id: "station-residual", name: "Estação antiga", active: true },
+      };
+
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithResidualStation);
+
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+
+      expect(prisma.orderItem.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          requiresProductionSnapshot: false,
+          stationIdSnapshot: null,
+          stationNameSnapshot: null,
+        }),
+        include: { additionals: true },
+      });
+    });
+
+    it("produto com produção e estação ativa roteia com id/nome corretos", async () => {
+      const productWithActiveStation = {
+        ...unitProduct,
+        requiresProduction: true,
+        stationId: "station-1",
+        station: { id: "station-1", name: "Confeitaria", active: true },
+      };
+
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithActiveStation);
+
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+
+      expect(prisma.orderItem.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          requiresProductionSnapshot: true,
+          stationIdSnapshot: "station-1",
+          stationNameSnapshot: "Confeitaria",
+        }),
+        include: { additionals: true },
+      });
+    });
+
+    it("rejeita com 400 PRODUCT_ROUTING_INVALID quando requiresProduction=true sem stationId", async () => {
+      const productWithoutStation = {
+        ...unitProduct,
+        requiresProduction: true,
+        stationId: null,
+        station: null,
+      };
+
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithoutStation);
+
+      await expect(
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+      ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_ROUTING_INVALID" });
+      expect(prisma.orderItem.create).not.toHaveBeenCalled();
+    });
+
+    it("rejeita com 400 PRODUCT_ROUTING_INVALID quando a relação station não existe (stationId órfão)", async () => {
+      const productWithOrphanStation = {
+        ...unitProduct,
+        requiresProduction: true,
+        stationId: "station-fantasma",
+        station: null,
+      };
+
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithOrphanStation);
+
+      await expect(
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+      ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_ROUTING_INVALID" });
+      expect(prisma.orderItem.create).not.toHaveBeenCalled();
+    });
+
+    it("rejeita com 400 STATION_NOT_AVAILABLE quando a estação configurada está inativa", async () => {
+      const productWithInactiveStation = {
+        ...unitProduct,
+        requiresProduction: true,
+        stationId: "station-2",
+        station: { id: "station-2", name: "Confeitaria", active: false },
+      };
+
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithInactiveStation);
+
+      await expect(
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+      ).rejects.toMatchObject({ statusCode: 400, code: "STATION_NOT_AVAILABLE" });
+      expect(prisma.orderItem.create).not.toHaveBeenCalled();
+    });
+  });
 });

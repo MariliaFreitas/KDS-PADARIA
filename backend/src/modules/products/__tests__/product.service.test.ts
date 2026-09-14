@@ -211,6 +211,25 @@ describe("product.service", () => {
 
       expect(result.station).toEqual({ id: "st1", name: "Forno", active: true });
     });
+
+    it("rejeita estação inativa com 400 STATION_NOT_AVAILABLE", async () => {
+      vi.mocked(prisma.station.findUnique).mockResolvedValue({
+        id: "st1",
+        name: "Forno",
+        active: false,
+      });
+
+      await expect(
+        createProduct({
+          name: "Pão francês",
+          saleType: "UNIT",
+          unitPriceCents: 50,
+          requiresProduction: true,
+          stationId: "st1",
+        }),
+      ).rejects.toMatchObject({ statusCode: 400, code: "STATION_NOT_AVAILABLE" });
+      expect(prisma.product.create).not.toHaveBeenCalled();
+    });
   });
 
   describe("updateProduct", () => {
@@ -324,6 +343,50 @@ describe("product.service", () => {
         statusCode: 404,
         code: "PRODUCT_NOT_FOUND",
       });
+      expect(prisma.product.update).not.toHaveBeenCalled();
+    });
+
+    it("permite mudar para requiresProduction=true apontando para estação ativa", async () => {
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(existingUnitProduct);
+      vi.mocked(prisma.station.findUnique).mockResolvedValue({
+        id: "st1",
+        name: "Forno",
+        active: true,
+      });
+      const updated = {
+        ...existingUnitProduct,
+        requiresProduction: true,
+        stationId: "st1",
+        station: { id: "st1", name: "Forno", active: true },
+      };
+      vi.mocked(prisma.product.update).mockResolvedValue(updated);
+
+      const result = await updateProduct("p1", { requiresProduction: true, stationId: "st1" });
+
+      expect(result.stationId).toBe("st1");
+      expect(prisma.product.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ requiresProduction: true, stationId: "st1" }),
+        }),
+      );
+    });
+
+    it("rejeita trocar stationId para uma estação inativa", async () => {
+      const productWithStation = {
+        ...existingUnitProduct,
+        requiresProduction: true,
+        stationId: "st1",
+      };
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithStation);
+      vi.mocked(prisma.station.findUnique).mockResolvedValue({
+        id: "st2",
+        name: "Confeitaria",
+        active: false,
+      });
+
+      await expect(
+        updateProduct("p1", { stationId: "st2" }),
+      ).rejects.toMatchObject({ statusCode: 400, code: "STATION_NOT_AVAILABLE" });
       expect(prisma.product.update).not.toHaveBeenCalled();
     });
   });

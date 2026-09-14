@@ -179,12 +179,21 @@ function ProductForm({
             className="w-full sm:w-64 rounded-lg bg-neutral-800 border border-neutral-700 px-3 py-2 text-neutral-100 outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="">Selecione uma estação</option>
-            {stations.map((station) => (
-              <option key={station.id} value={station.id}>
-                {station.name}
-                {!station.active ? " (inativa)" : ""}
-              </option>
-            ))}
+            {/*
+              Só oferece estações ativas como nova seleção (Etapa 11): uma
+              estação inativa não pode ser escolhida daqui pra frente. A
+              exceção é a própria estação já selecionada neste formulário —
+              ela continua aparecendo (marcada como inativa) para não quebrar
+              a edição de um produto que já estava associado a ela.
+            */}
+            {stations
+              .filter((station) => station.active || station.id === value.stationId)
+              .map((station) => (
+                <option key={station.id} value={station.id}>
+                  {station.name}
+                  {!station.active ? " (inativa)" : ""}
+                </option>
+              ))}
           </select>
         )}
       </div>
