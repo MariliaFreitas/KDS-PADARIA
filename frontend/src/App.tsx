@@ -12,6 +12,7 @@ import OrderPage from "./features/orders/OrderPage.js";
 import AddItemPage from "./features/orders/AddItemPage.js";
 import ProductionStationsPage from "./features/production/ProductionStationsPage.js";
 import ProductionKdsPage from "./features/production/ProductionKdsPage.js";
+import CashierPage from "./features/cashier/CashierPage.js";
 
 export default function App() {
   return (
@@ -96,6 +97,14 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["PRODUCAO", "ADMIN"]}>
                 <ProductionKdsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/cashier"
+            element={
+              <ProtectedRoute allowedRoles={["CAIXA", "ADMIN"]}>
+                <CashierPage />
               </ProtectedRoute>
             }
           />

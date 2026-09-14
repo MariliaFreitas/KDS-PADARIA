@@ -1,4 +1,4 @@
-import type { Order, OrderItem, OrderItemAdditional, Product, Station } from "@prisma/client";
+import type { Order, OrderItem, OrderItemAdditional, Prisma, Product, Station } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
@@ -9,12 +9,36 @@ export type OrderItemWithAdditionals = OrderItem & { additionals: OrderItemAddit
 type ProductWithStation = Product & { station: Station | null };
 
 /**
- * Pedido precisa existir e estar "aberto" (nem cancelado, nem já
- * entregue) para aceitar item novo. paymentStatus é ignorado de propósito
- * aqui: pagamento é independente do andamento operacional (Etapa 9).
+ * Trava a linha do pedido (SELECT ... FOR UPDATE) pelo resto da transação
+ * atual. É isso — e só isso — que serializa addOrderItem contra
+ * confirmPayment no mesmo pedido: sem essa trava, os dois liam o pedido
+ * de forma independente e um item podia ser criado depois do fechamento
+ * financeiro só porque a leitura de addOrderItem aconteceu antes do
+ * commit do pagamento. Com a trava, quem chega primeiro decide: se
+ * addOrderItem trava primeiro, o item existe quando confirmPayment ler os
+ * itens; se confirmPayment trava primeiro, addOrderItem só volta a rodar
+ * depois do commit do pagamento e enxerga paymentStatus=PAGO.
  */
-async function getOpenOrder(orderId: string): Promise<Order> {
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
+async function lockOrderForUpdate(tx: Prisma.TransactionClient, orderId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "orders" WHERE id = ${orderId} FOR UPDATE`;
+}
+
+/**
+ * Pedido precisa existir e estar "aberto" (nem cancelado, nem já
+ * entregue, nem pago) para aceitar item novo.
+ *
+ * O andamento operacional (cancelado/entregue) e o pagamento continuam
+ * sendo, de propósito, dois estados independentes — nenhum implica o
+ * outro automaticamente em nenhum outro lugar do sistema. Mas incluir
+ * item num pedido já pago mudaria um total que o caixa já deu como
+ * fechado, então essa combinação específica é bloqueada aqui — e, para
+ * isso valer também sob concorrência, a checagem só acontece depois de
+ * travar a linha do pedido (ver lockOrderForUpdate).
+ */
+async function getOpenOrder(tx: Prisma.TransactionClient, orderId: string): Promise<Order> {
+  await lockOrderForUpdate(tx, orderId);
+
+  const order = await tx.order.findUnique({ where: { id: orderId } });
 
   if (!order) {
     throw new AppError("Pedido não encontrado.", 404, ErrorCode.ORDER_NOT_FOUND);
@@ -28,12 +52,23 @@ async function getOpenOrder(orderId: string): Promise<Order> {
     );
   }
 
+  if (order.paymentStatus === "PAGO") {
+    throw new AppError(
+      "Este pedido já foi pago e não aceita novos itens.",
+      409,
+      ErrorCode.ORDER_ALREADY_PAID,
+    );
+  }
+
   return order;
 }
 
 /** Produto precisa existir e estar vendável (active + available). */
-async function getSellableProduct(productId: string): Promise<ProductWithStation> {
-  const product = await prisma.product.findUnique({
+async function getSellableProduct(
+  tx: Prisma.TransactionClient,
+  productId: string,
+): Promise<ProductWithStation> {
+  const product = await tx.product.findUnique({
     where: { id: productId },
     include: { station: true },
   });
@@ -72,6 +107,7 @@ function rejectItemInput(message: string): never {
  * preço-base congelado a partir do cadastro atual (Etapa 9/10).
  */
 async function resolveSaleTypeFields(
+  tx: Prisma.TransactionClient,
   product: ProductWithStation,
   input: CreateOrderItemInput,
 ): Promise<ResolvedSaleTypeFields> {
@@ -114,7 +150,7 @@ async function resolveSaleTypeFields(
       rejectItemInput("Produto por variação não aceita weightGrams.");
     }
 
-    const variation = await prisma.productVariation.findUnique({
+    const variation = await tx.productVariation.findUnique({
       where: { id: input.variationId },
     });
 
@@ -221,6 +257,7 @@ interface ResolvedAdditional {
 
 /** Adicionais são globais — cada um é resolvido e congelado individualmente. */
 async function resolveAdditionals(
+  tx: Prisma.TransactionClient,
   input: CreateOrderItemInput["additionals"],
 ): Promise<{ additionals: ResolvedAdditional[]; subtotalCents: number }> {
   if (!input || input.length === 0) {
@@ -231,7 +268,7 @@ async function resolveAdditionals(
   let subtotalCents = 0;
 
   for (const item of input) {
-    const additional = await prisma.additional.findUnique({ where: { id: item.additionalId } });
+    const additional = await tx.additional.findUnique({ where: { id: item.additionalId } });
 
     if (!additional) {
       throw new AppError("Adicional não encontrado.", 404, ErrorCode.ADDITIONAL_NOT_FOUND);
@@ -270,37 +307,45 @@ export async function addOrderItem(
   orderId: string,
   input: CreateOrderItemInput,
 ): Promise<OrderItemWithAdditionals> {
-  const order = await getOpenOrder(orderId);
-  const product = await getSellableProduct(input.productId);
+  // Tudo roda numa única transação, começando pela trava da linha do
+  // pedido (getOpenOrder chama lockOrderForUpdate primeiro): garante que
+  // nenhuma inclusão de item consiga terminar depois de um pagamento que
+  // já fechou a conta, mesmo com as duas operações chegando ao mesmo
+  // tempo (ver confirmPayment, que trava a mesma linha do mesmo jeito).
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const order = await getOpenOrder(tx, orderId);
+    const product = await getSellableProduct(tx, input.productId);
 
-  const saleTypeFields = await resolveSaleTypeFields(product, input);
-  const { additionals, subtotalCents: additionalsSubtotalCents } = await resolveAdditionals(
-    input.additionals,
-  );
-  const productionRoute = resolveProductionRoute(product);
+    const saleTypeFields = await resolveSaleTypeFields(tx, product, input);
+    const { additionals, subtotalCents: additionalsSubtotalCents } = await resolveAdditionals(
+      tx,
+      input.additionals,
+    );
+    const productionRoute = resolveProductionRoute(product);
 
-  const totalCents = saleTypeFields.subtotalBaseCents + additionalsSubtotalCents;
+    const totalCents = saleTypeFields.subtotalBaseCents + additionalsSubtotalCents;
 
-  return prisma.orderItem.create({
-    data: {
-      orderId: order.id,
-      productId: product.id,
-      productNameSnapshot: product.name,
-      saleType: product.saleType,
-      basePriceCentsSnapshot: saleTypeFields.basePriceCentsSnapshot,
-      requiresProductionSnapshot: productionRoute.requiresProductionSnapshot,
-      quantity: saleTypeFields.quantity,
-      weightGrams: saleTypeFields.weightGrams,
-      variationId: saleTypeFields.variationId,
-      variationNameSnapshot: saleTypeFields.variationNameSnapshot,
-      stationIdSnapshot: productionRoute.stationIdSnapshot,
-      stationNameSnapshot: productionRoute.stationNameSnapshot,
-      totalCents,
-      observation: input.observation,
-      additionals: {
-        create: additionals,
+    return tx.orderItem.create({
+      data: {
+        orderId: order.id,
+        productId: product.id,
+        productNameSnapshot: product.name,
+        saleType: product.saleType,
+        basePriceCentsSnapshot: saleTypeFields.basePriceCentsSnapshot,
+        requiresProductionSnapshot: productionRoute.requiresProductionSnapshot,
+        quantity: saleTypeFields.quantity,
+        weightGrams: saleTypeFields.weightGrams,
+        variationId: saleTypeFields.variationId,
+        variationNameSnapshot: saleTypeFields.variationNameSnapshot,
+        stationIdSnapshot: productionRoute.stationIdSnapshot,
+        stationNameSnapshot: productionRoute.stationNameSnapshot,
+        totalCents,
+        observation: input.observation,
+        additionals: {
+          create: additionals,
+        },
       },
-    },
-    include: { additionals: true },
+      include: { additionals: true },
+    });
   });
 }

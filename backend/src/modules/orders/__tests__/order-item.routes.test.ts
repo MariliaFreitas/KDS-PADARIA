@@ -241,6 +241,20 @@ describe("POST /api/orders/:orderId/items", () => {
     expect(response.body.code).toBe(ErrorCode.ORDER_NOT_OPEN);
   });
 
+  it("mapeia ORDER_ALREADY_PAID do service para 409", async () => {
+    vi.mocked(orderItemService.addOrderItem).mockRejectedValue(
+      new AppError("Pedido já pago.", 409, ErrorCode.ORDER_ALREADY_PAID),
+    );
+
+    const response = await request(app)
+      .post("/api/orders/order-1/items")
+      .set("Authorization", `Bearer ${atendenteToken}`)
+      .send({ productId: "product-1", quantity: 1 });
+
+    expect(response.status).toBe(409);
+    expect(response.body.code).toBe(ErrorCode.ORDER_ALREADY_PAID);
+  });
+
   it("mapeia PRODUCT_NOT_AVAILABLE do service para 400", async () => {
     vi.mocked(orderItemService.addOrderItem).mockRejectedValue(
       new AppError("Produto indisponível.", 400, ErrorCode.PRODUCT_NOT_AVAILABLE),

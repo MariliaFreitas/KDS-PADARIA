@@ -14,6 +14,11 @@
 //   descrito (PENDENTE/PAGO + baixa).
 // - orderNumber é gerado por uma sequência própria do banco (autoincrement
 //   em campo não-chave-primária), nunca contado em memória.
+// - serviceNumber é um número operacional separado do orderNumber: visível
+//   ao cliente, reutilizável (volta ao pool depois de pago) e controlado
+//   pela tabela ServiceNumberSlot — nunca calculado em memória nem com
+//   max+1 sem proteção. orderNumber continua único e permanente, sem
+//   nenhuma relação com o ciclo de reuso do serviceNumber.
 
 generator client {
   provider = "prisma-client-js"
@@ -159,6 +164,12 @@ model Order {
   // nunca contado em memória — evita duplicidade em pico de pedidos.
   orderNumber Int @unique @default(autoincrement())
 
+  // Número operacional (visível ao cliente/caixa/KDS), reutilizável.
+  // default(0) é só um placeholder técnico: createOrder sempre sobrescreve
+  // esse valor com o número real ANTES de a transação de criação terminar
+  // — nenhum pedido fica visível de fora com serviceNumber=0.
+  serviceNumber Int @default(0)
+
   customerName    String
   channel         OrderChannel
   consumptionType ConsumptionType
@@ -186,8 +197,29 @@ model Order {
   items             OrderItem[]
   history           OrderHistory[]
   pickupInformation PickupInformation?
+  serviceNumberSlot ServiceNumberSlot?
 
   @@map("orders")
+}
+
+// ---------------------------------------------------------------------------
+// Pool de números operacionais reutilizáveis
+// ---------------------------------------------------------------------------
+
+// Cada linha é o número atualmente em uso por um pedido. reusableAt=null
+// significa "em uso, não elegível para reuso"; quando o pedido dono é
+// pago, reusableAt vira paidAt+7h — só a partir desse instante outra
+// criação de pedido pode reivindicar este número para si (updateMany
+// condicional a reusableAt, nunca um lock próprio). number é sempre o
+// menor disponível na hora de alocar um número novo para um pedido.
+model ServiceNumberSlot {
+  id         String    @id @default(uuid())
+  number     Int       @unique
+  orderId    String    @unique
+  order      Order     @relation(fields: [orderId], references: [id])
+  reusableAt DateTime?
+
+  @@map("service_number_slots")
 }
 
 model OrderItem {

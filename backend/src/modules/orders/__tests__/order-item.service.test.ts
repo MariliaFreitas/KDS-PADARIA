@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../../lib/prisma.js", () => ({
   prisma: {
+    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
     order: { findUnique: vi.fn() },
     product: { findUnique: vi.fn() },
     productVariation: { findUnique: vi.fn() },
@@ -31,6 +33,7 @@ function item(
 const openOrder = {
   id: "order-1",
   orderNumber: 154,
+  serviceNumber: 12,
   customerName: "Maria",
   channel: "BALCAO" as const,
   consumptionType: "LOCAL" as const,
@@ -58,6 +61,14 @@ const deliveredOrder = {
   ...openOrder,
   id: "order-delivered",
   deliveredAt: new Date("2026-01-02T00:00:00.000Z"),
+};
+
+const paidOrder = {
+  ...openOrder,
+  id: "order-paid",
+  paymentStatus: "PAGO" as const,
+  paidAt: new Date("2026-01-02T00:00:00.000Z"),
+  paidByUserId: "caixa-1",
 };
 
 const unitProduct = {
@@ -142,6 +153,14 @@ const createdOrderItemFixture = {
 describe("order-item.service", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // addOrderItem roda tudo dentro de prisma.$transaction; como os mocks
+    // abaixo são os mesmos objetos vi.fn() tanto em prisma.* quanto no "tx"
+    // recebido pelo callback, nenhuma asserção existente muda — só passamos
+    // o mock inteiro como se fosse o client da transação.
+    vi.mocked(prisma.$transaction).mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+      Promise.resolve(callback(prisma)),
+    );
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ id: "order-1" }]);
     vi.mocked(prisma.order.findUnique).mockResolvedValue(openOrder);
     vi.mocked(prisma.orderItem.create).mockResolvedValue(createdOrderItemFixture);
   });
@@ -169,6 +188,15 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem("order-delivered", item({ productId: "product-unit", quantity: 1 })),
       ).rejects.toMatchObject({ statusCode: 409, code: "ORDER_NOT_OPEN" });
+    });
+
+    it("rejeita pedido já pago com 409 ORDER_ALREADY_PAID", async () => {
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(paidOrder);
+
+      await expect(
+        addOrderItem("order-paid", item({ productId: "product-unit", quantity: 1 })),
+      ).rejects.toMatchObject({ statusCode: 409, code: "ORDER_ALREADY_PAID" });
+      expect(prisma.product.findUnique).not.toHaveBeenCalled();
     });
   });
 

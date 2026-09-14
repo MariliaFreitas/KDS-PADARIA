@@ -193,20 +193,28 @@ export default function AddItemPage() {
         {!loading && !loadError && order && catalog && (
           <>
             <div>
-              <h1 className="text-2xl font-semibold">Pedido #{order.orderNumber}</h1>
+              <h1 className="text-2xl font-semibold">Pedido #{order.serviceNumber}</h1>
               <p className="text-neutral-400">{order.customerName}</p>
             </div>
 
-            {submitError && (
-              <p
-                role="alert"
-                className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2"
-              >
-                {submitError}
+            {order.paymentStatus === "PAGO" && (
+              <p className="text-sm text-neutral-300 bg-neutral-900 border border-neutral-800 rounded-xl px-4 py-3">
+                Esta conta já foi fechada e não aceita novos itens.
               </p>
             )}
 
-            {!selectedProduct && (
+            {order.paymentStatus === "PENDENTE" && (
+              <>
+                {submitError && (
+                  <p
+                    role="alert"
+                    className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2"
+                  >
+                    {submitError}
+                  </p>
+                )}
+
+                {!selectedProduct && (
               <>
                 <input
                   type="text"
@@ -369,6 +377,8 @@ export default function AddItemPage() {
                   {submitting ? "Adicionando..." : "Adicionar ao pedido"}
                 </button>
               </div>
+            )}
+              </>
             )}
 
             <div className="text-center">

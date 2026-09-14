@@ -21,6 +21,10 @@ function formatBRL(cents: number): string {
   );
 }
 
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
 function itemQuantityLabel(item: OrderItem): string {
   if (item.saleType === "WEIGHT") {
     return `${item.weightGrams} g`;
@@ -112,11 +116,18 @@ export default function OrderPage() {
         {!loading && !error && order && (
           <>
             <div>
-              <h1 className="text-2xl font-semibold">Pedido #{order.orderNumber}</h1>
+              <h1 className="text-2xl font-semibold">Pedido #{order.serviceNumber}</h1>
               <p className="text-neutral-300">{order.customerName}</p>
               <p className="text-sm text-neutral-500">
                 {CHANNEL_LABEL[order.channel]} • {CONSUMPTION_LABEL[order.consumptionType]}
               </p>
+              {order.paymentStatus === "PENDENTE" ? (
+                <p className="text-sm text-emerald-400 mt-1">
+                  Conta aberta desde {formatTime(order.createdAt)}
+                </p>
+              ) : (
+                <p className="text-sm text-neutral-400 mt-1">Conta fechada • PAGO</p>
+              )}
             </div>
 
             {order.items.length === 0 ? (
@@ -131,12 +142,14 @@ export default function OrderPage() {
               </div>
             )}
 
-            <Link
-              to={`/orders/${order.id}/items/new`}
-              className="block w-full text-center rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-4 transition-colors"
-            >
-              + Adicionar outro item
-            </Link>
+            {order.paymentStatus === "PENDENTE" && (
+              <Link
+                to={`/orders/${order.id}/items/new`}
+                className="block w-full text-center rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-4 transition-colors"
+              >
+                + Adicionar outro item
+              </Link>
+            )}
 
             <div className="text-center">
               <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">

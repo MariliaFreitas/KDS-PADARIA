@@ -27,7 +27,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 10 — Cálculo de preços** (implementada junto da Etapa 9: `OrderItem` exige `basePriceCentsSnapshot`/`totalCents` já congelados na criação, então preço e item nascem juntos — snapshots de produto/variação/adicionais e total em centavos calculado no servidor)
 - [x] **Etapa 11 — Roteamento para estações** (o roteamento de um item para uma estação é sempre derivado do cadastro atual do produto, nunca do cliente: produto sem produção nunca recebe estação no item, mesmo com `stationId` residual no cadastro; produto com produção exige uma estação ativa configurada — sem isso o item não é criado; a estação é congelada em `stationIdSnapshot`/`stationNameSnapshot` no momento da criação do item e nunca é reescrita depois, mesmo que o produto ou a estação mudem; fila/KDS de produção ficam para a Etapa 12)
 - [x] **Etapa 12 — Preparo/KDS** (fila de preparo por estação: `GET /api/production/stations`, `GET /api/production/stations/:stationId/items`, `PATCH .../advance`, restrito a PRODUCAO/ADMIN; a fila usa sempre `stationIdSnapshot`/`requiresProductionSnapshot` do item, nunca o cadastro atual do produto; status só avança PENDENTE→EM_PREPARO→PRONTO; tela `/production` para escolher a estação e `/production/stations/:stationId` para o KDS)
-- [ ] Etapa 13 — Caixa
+- [x] **Etapa 13 — Caixa** (conta aberta é só `paymentStatus=PENDENTE` e não cancelado — nenhuma coluna nova para isso; `GET /api/cashier/orders` lista, busca por número operacional (aceita `27` ou `#27`) ou nome do cliente, e traz o resumo dos itens cobráveis de cada pedido (produto, quantidade/peso, variação e adicionais, sempre excluindo itens CANCELADO); `PATCH /api/cashier/orders/:orderId/confirm-payment` confirma pagamento com total sempre recalculado no servidor a partir dos itens não cancelados, restrito a CAIXA/ADMIN; item novo é rejeitado em pedido já pago (`ORDER_ALREADY_PAID`); número operacional (`serviceNumber`) é um número reutilizável e independente do `orderNumber` técnico — alocado por um pool com constraint de unicidade, nunca por contagem em memória, e só volta a ficar disponível 7h depois do pagamento; tela `/cashier` restrita a CAIXA/ADMIN)
 - [ ] Etapa 14 — Retirada/entrega
 - [ ] Etapa 15 — Histórico
 - [ ] Etapa 16 — Tempo real
@@ -70,15 +70,45 @@ exemplo e não sobe com ele.** Para gerar um valor aleatório:
 node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
-Aplique o schema no banco e crie o usuário administrador:
+O schema é aplicado sempre pelo histórico de migrations em
+`prisma/migrations/` — não use mais `prisma db push` para isso, nem em banco
+novo. O histórico tem duas migrations: uma baseline (`20260913000000_baseline`,
+representando o schema completo de antes desta etapa) e uma incremental
+(`20260914000000_add_service_number_and_pool`, só com o que esta etapa
+adiciona).
+
+**Banco novo, sem nenhuma tabela ainda:** roda o histórico inteiro do zero —
+baseline primeiro, incremental depois:
 
 ```bash
-npx prisma migrate dev
+npx prisma migrate deploy
 npm run seed
 ```
 
-O seed cria apenas o usuário administrador. Nenhum produto, estação, variação
-ou adicional é criado — esse cadastro é feito pelas telas de administração.
+**Banco já em uso, com tabelas e pedidos de antes desta etapa** (schema
+aplicado até aqui por `db push` ou qualquer outro meio fora de migrations):
+já tem o schema da baseline, então rodar a baseline de novo tentaria recriar
+tabelas que já existem. Marque-a como já aplicada, sem executá-la, e deixe o
+`migrate deploy` aplicar só o que falta (a migration incremental desta
+etapa):
+
+```bash
+npx prisma migrate resolve --applied 20260913000000_baseline
+npx prisma migrate deploy
+```
+
+A migration incremental cria a coluna `serviceNumber` e a tabela
+`service_number_slots`, e já dá a cada pedido existente um `serviceNumber`
+válido e o slot correspondente na mesma transação — pedido aberto ou
+cancelado sem pagamento confirmado não libera o número (`reusableAt = NULL`);
+pedido pago libera só em `paidAt + 7h` — sem apagar nem renumerar nada, e sem
+depender de nenhum passo manual depois. `orderNumber` nunca é alterado. Não
+há mais nenhum script separado de backfill: o próprio `migrate deploy` é o
+único fluxo, tanto para banco novo quanto para banco existente.
+
+Em ambos os casos, o seed cria apenas o usuário administrador. Nenhum
+produto, estação, variação ou adicional é criado — esse cadastro é feito
+pelas telas de administração.
 
 Suba o servidor:
 
@@ -147,6 +177,18 @@ Registradas aqui porque afetam quem for mexer no código:
   registro de histórico e nenhuma apaga dado.
 - **`orderNumber` é gerado pelo banco** por autoincrement, nunca contado em
   memória.
+- **`serviceNumber` é um número operacional separado do `orderNumber`.**
+  Visível ao cliente/caixa/KDS e reutilizável — controlado por um pool
+  (`ServiceNumberSlot`) com constraint de unicidade, nunca por `max+1` sem
+  proteção. Um número só volta a ficar disponível 7h depois do **pagamento**
+  do pedido que o usava — cancelamento sozinho não libera o número, essa
+  etapa não define uma política de liberação por cancelamento. `orderNumber`
+  continua único e permanente, sem nenhuma relação com esse ciclo de reuso.
+- **Conta aberta é só `paymentStatus=PENDENTE` e não cancelado.** Não existe
+  nenhuma coluna própria para esse conceito — é sempre essa mesma consulta.
+- **Total cobrado no caixa é sempre recalculado no servidor**, somando
+  `OrderItem.totalCents` dos itens não cancelados. Nunca aceita um total vindo
+  do cliente.
 - **Peso é armazenado em gramas inteiras**, evitando erro de arredondamento de
   ponto flutuante.
 - **Não há hierarquia entre perfis.** ADMIN não herda acesso automaticamente;
@@ -164,9 +206,11 @@ kds-padaria/
 ├── docker-compose.yml             # PostgreSQL
 ├── backend/
 │   ├── prisma/
-│   │   ├── schema.prisma          # modelo do banco
-│   │   ├── seed.ts                # cria apenas o usuário administrador
-│   │   └── migrations/            # histórico do banco (versionado)
+│   │   ├── schema.prisma                  # modelo do banco
+│   │   ├── seed.ts                        # cria apenas o usuário administrador
+│   │   └── migrations/                    # histórico do banco (versionado)
+│   │       ├── 20260913000000_baseline/                   # schema completo anterior a esta etapa
+│   │       └── 20260914000000_add_service_number_and_pool/ # delta desta etapa (serviceNumber + backfill)
 │   └── src/
 │       ├── server.ts              # bootstrap
 │       ├── app.ts                 # montagem do Express

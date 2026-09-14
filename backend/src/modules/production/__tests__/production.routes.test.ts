@@ -38,7 +38,7 @@ const queueItemFixture = {
   observation: null,
   includedAt: new Date("2026-01-01T10:00:00.000Z"),
   additionals: [],
-  order: { orderNumber: 154, customerName: "Maria" },
+  order: { serviceNumber: 154, customerName: "Maria" },
 };
 
 const advancedItemFixture = {

@@ -7,6 +7,7 @@ export type OrderItemStatus = "PENDENTE" | "EM_PREPARO" | "PRONTO" | "CANCELADO"
 export interface Order {
   id: string;
   orderNumber: number;
+  serviceNumber: number;
   customerName: string;
   channel: OrderChannel;
   consumptionType: ConsumptionType;

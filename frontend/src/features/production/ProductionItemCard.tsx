@@ -56,7 +56,7 @@ export function ProductionItemCard({ item, onAdvance, advancing }: ProductionIte
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-lg font-semibold text-neutral-100">
-            Pedido #{item.order.orderNumber}
+            Pedido #{item.order.serviceNumber}
           </p>
           <p className="text-neutral-400">{item.order.customerName}</p>
         </div>

@@ -55,7 +55,7 @@ interface ItemFixture {
   observation: string | null;
   includedAt: Date;
   additionals: ItemAdditionalFixture[];
-  order: { orderNumber: number; customerName: string };
+  order: { serviceNumber: number; customerName: string };
 }
 
 function item(overrides: Partial<ItemFixture> = {}): ItemFixture {
@@ -78,7 +78,7 @@ function item(overrides: Partial<ItemFixture> = {}): ItemFixture {
     observation: null,
     includedAt: new Date("2026-01-01T10:00:00.000Z"),
     additionals: [],
-    order: { orderNumber: 154, customerName: "Maria" },
+    order: { serviceNumber: 154, customerName: "Maria" },
     ...overrides,
   };
 }
@@ -165,7 +165,7 @@ describe("production.service", () => {
           observation: null,
           includedAt: new Date("2026-01-01T10:00:00.000Z"),
           additionals: [],
-          order: { orderNumber: 154, customerName: "Maria" },
+          order: { serviceNumber: 154, customerName: "Maria" },
         },
       ]);
       expect(result[0]).not.toHaveProperty("basePriceCentsSnapshot");
@@ -214,7 +214,7 @@ describe("production.service", () => {
         orderBy: { includedAt: "asc" },
         include: {
           additionals: true,
-          order: { select: { orderNumber: true, customerName: true } },
+          order: { select: { serviceNumber: true, customerName: true } },
         },
       });
     });

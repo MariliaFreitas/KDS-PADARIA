@@ -34,6 +34,7 @@ const caixaToken = tokenFor("CAIXA", "caixa-1");
 const baseOrder = {
   id: "order-1",
   orderNumber: 154,
+  serviceNumber: 12,
   customerName: "Maria",
   channel: "BALCAO",
   consumptionType: "LOCAL",
@@ -270,7 +271,7 @@ describe("/api/orders", () => {
       expect(response.body.paymentStatus).toBe("PENDENTE");
     });
 
-    it("ignora campos protegidos enviados pelo cliente (orderNumber, paymentStatus, createdAt, id)", async () => {
+    it("ignora campos protegidos enviados pelo cliente (orderNumber, serviceNumber, paymentStatus, createdAt, id)", async () => {
       vi.mocked(orderService.createOrder).mockResolvedValue(baseOrder as never);
 
       await request(app)
@@ -282,6 +283,7 @@ describe("/api/orders", () => {
           consumptionType: "LOCAL",
           id: "id-forjado",
           orderNumber: 999,
+          serviceNumber: 1,
           paymentStatus: "PAGO",
           createdAt: "2020-01-01T00:00:00.000Z",
         });
@@ -289,6 +291,7 @@ describe("/api/orders", () => {
       const call = vi.mocked(orderService.createOrder).mock.calls[0][0];
       expect(call).not.toHaveProperty("id");
       expect(call).not.toHaveProperty("orderNumber");
+      expect(call).not.toHaveProperty("serviceNumber");
       expect(call).not.toHaveProperty("paymentStatus");
       expect(call).not.toHaveProperty("createdAt");
     });

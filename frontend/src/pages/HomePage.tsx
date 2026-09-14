@@ -47,6 +47,15 @@ export default function HomePage() {
         </Link>
       )}
 
+      {(user?.role === "CAIXA" || user?.role === "ADMIN") && (
+        <Link
+          to="/cashier"
+          className="mt-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold px-6 py-3 text-base transition-colors"
+        >
+          Caixa
+        </Link>
+      )}
+
       {user?.role === "ADMIN" && (
         <div className="mt-2 flex flex-wrap justify-center gap-2">
           <Link

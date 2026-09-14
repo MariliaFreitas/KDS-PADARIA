@@ -66,6 +66,14 @@ export const ErrorCode = {
   ORDER_ITEM_NOT_FOUND: "ORDER_ITEM_NOT_FOUND",
   /** Item é desta estação, mas o status atual não permite avançar. */
   ORDER_ITEM_ADVANCE_NOT_ALLOWED: "ORDER_ITEM_ADVANCE_NOT_ALLOWED",
+  /** Pedido já está com paymentStatus=PAGO — bloqueia inclusão de novo item. */
+  ORDER_ALREADY_PAID: "ORDER_ALREADY_PAID",
+  /** Pedido está cancelado — não pode ter pagamento confirmado. */
+  ORDER_CANCELLED: "ORDER_CANCELLED",
+  /** Pagamento já havia sido confirmado para este pedido (dupla confirmação, inclusive concorrente). */
+  PAYMENT_ALREADY_CONFIRMED: "PAYMENT_ALREADY_CONFIRMED",
+  /** Pedido sem nenhum item cobrável (todos cancelados ou nenhum item incluído) — nada a cobrar. */
+  PAYMENT_NOTHING_TO_CHARGE: "PAYMENT_NOTHING_TO_CHARGE",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

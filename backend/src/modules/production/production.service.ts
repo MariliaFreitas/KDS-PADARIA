@@ -56,7 +56,7 @@ export interface ProductionQueueItem {
   observation: string | null;
   includedAt: Date;
   additionals: Pick<OrderItemAdditional, "id" | "nameSnapshot" | "quantity">[];
-  order: { orderNumber: number; customerName: string };
+  order: { serviceNumber: number; customerName: string };
 }
 
 /**
@@ -75,7 +75,7 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
 
   type QueueItemRow = OrderItem & {
     additionals: OrderItemAdditional[];
-    order: { orderNumber: number; customerName: string };
+    order: { serviceNumber: number; customerName: string };
   };
 
   const items: QueueItemRow[] = await prisma.orderItem.findMany({
@@ -87,7 +87,7 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
     orderBy: { includedAt: "asc" },
     include: {
       additionals: true,
-      order: { select: { orderNumber: true, customerName: true } },
+      order: { select: { serviceNumber: true, customerName: true } },
     },
   });
 

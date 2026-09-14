@@ -25,7 +25,7 @@ export interface ProductionItem {
   includedAt: string;
   additionals: ProductionItemAdditional[];
   order: {
-    orderNumber: number;
+    serviceNumber: number;
     customerName: string;
   };
 }
