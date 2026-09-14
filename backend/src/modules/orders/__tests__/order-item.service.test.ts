@@ -461,20 +461,14 @@ describe("order-item.service", () => {
     });
 
     it("cria item com múltiplos adicionais e quantity > 1", async () => {
-      vi.mocked(prisma.additional.findUnique).mockImplementation(
-        async ({ where }: { where: { id: string } }) => {
-          if (where.id === "additional-1") return additionalFixture;
-          if (where.id === "additional-2") {
-            return {
-              ...additionalFixture,
-              id: "additional-2",
-              name: "Chocolate",
-              priceCents: 200,
-            };
-          }
-          return null;
-        },
-      );
+      vi.mocked(prisma.additional.findUnique)
+        .mockResolvedValueOnce(additionalFixture)
+        .mockResolvedValueOnce({
+          ...additionalFixture,
+          id: "additional-2",
+          name: "Chocolate",
+          priceCents: 200,
+        });
 
       await addOrderItem(
         "order-1",
