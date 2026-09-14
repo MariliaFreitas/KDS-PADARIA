@@ -155,21 +155,29 @@ function ProductForm({
       )}
 
       <div className="space-y-2">
-        <label className="flex items-center gap-2 text-sm text-neutral-300">
-          <input
-            type="checkbox"
-            checked={value.requiresProduction}
-            onChange={(event) =>
-              onChange({
-                ...value,
-                requiresProduction: event.target.checked,
-                stationId: event.target.checked ? value.stationId : "",
-              })
-            }
-            className="rounded border-neutral-700 bg-neutral-800"
-          />
-          Este produto exige produção (vai para uma estação)
-        </label>
+        <p className="text-sm text-neutral-300">Precisa ser preparado após o pedido?</p>
+        <div className="space-y-1">
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input
+              type="radio"
+              name="requiresProduction"
+              checked={!value.requiresProduction}
+              onChange={() => onChange({ ...value, requiresProduction: false, stationId: "" })}
+              className="border-neutral-700 bg-neutral-800"
+            />
+            Não — já está pronto para entrega
+          </label>
+          <label className="flex items-center gap-2 text-sm text-neutral-300">
+            <input
+              type="radio"
+              name="requiresProduction"
+              checked={value.requiresProduction}
+              onChange={() => onChange({ ...value, requiresProduction: true })}
+              className="border-neutral-700 bg-neutral-800"
+            />
+            Sim — precisa entrar em uma fila de preparo
+          </label>
+        </div>
 
         {value.requiresProduction && (
           <select

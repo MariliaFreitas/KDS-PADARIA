@@ -58,6 +58,14 @@ export const ErrorCode = {
   PRODUCT_ROUTING_INVALID: "PRODUCT_ROUTING_INVALID",
   /** Estação existe, mas está inativa — bloqueia roteamento de item novo e cadastro/edição de produto (Etapa 11). */
   STATION_NOT_AVAILABLE: "STATION_NOT_AVAILABLE",
+  /**
+   * Item de pedido inexistente, ou existente mas fora do escopo da estação
+   * pedida (de outra estação, ou sem preparo) — mesma resposta para os três
+   * casos, para não vazar em qual estação o item realmente está.
+   */
+  ORDER_ITEM_NOT_FOUND: "ORDER_ITEM_NOT_FOUND",
+  /** Item é desta estação, mas o status atual não permite avançar. */
+  ORDER_ITEM_ADVANCE_NOT_ALLOWED: "ORDER_ITEM_ADVANCE_NOT_ALLOWED",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

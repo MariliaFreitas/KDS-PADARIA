@@ -26,7 +26,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 9 — Adição de itens** (`POST /api/orders/:orderId/items`, `GET /api/orders/catalog`, tela `/orders/:orderId/items/new`, restrito a ATENDENTE/ADMIN)
 - [x] **Etapa 10 — Cálculo de preços** (implementada junto da Etapa 9: `OrderItem` exige `basePriceCentsSnapshot`/`totalCents` já congelados na criação, então preço e item nascem juntos — snapshots de produto/variação/adicionais e total em centavos calculado no servidor)
 - [x] **Etapa 11 — Roteamento para estações** (o roteamento de um item para uma estação é sempre derivado do cadastro atual do produto, nunca do cliente: produto sem produção nunca recebe estação no item, mesmo com `stationId` residual no cadastro; produto com produção exige uma estação ativa configurada — sem isso o item não é criado; a estação é congelada em `stationIdSnapshot`/`stationNameSnapshot` no momento da criação do item e nunca é reescrita depois, mesmo que o produto ou a estação mudem; fila/KDS de produção ficam para a Etapa 12)
-- [ ] Etapa 12 — KDS (produção)
+- [x] **Etapa 12 — Preparo/KDS** (fila de preparo por estação: `GET /api/production/stations`, `GET /api/production/stations/:stationId/items`, `PATCH .../advance`, restrito a PRODUCAO/ADMIN; a fila usa sempre `stationIdSnapshot`/`requiresProductionSnapshot` do item, nunca o cadastro atual do produto; status só avança PENDENTE→EM_PREPARO→PRONTO; tela `/production` para escolher a estação e `/production/stations/:stationId` para o KDS)
 - [ ] Etapa 13 — Caixa
 - [ ] Etapa 14 — Retirada/entrega
 - [ ] Etapa 15 — Histórico

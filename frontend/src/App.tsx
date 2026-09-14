@@ -10,6 +10,8 @@ import AdditionalsPage from "./features/additionals/AdditionalsPage.js";
 import NewOrderPage from "./features/orders/NewOrderPage.js";
 import OrderPage from "./features/orders/OrderPage.js";
 import AddItemPage from "./features/orders/AddItemPage.js";
+import ProductionStationsPage from "./features/production/ProductionStationsPage.js";
+import ProductionKdsPage from "./features/production/ProductionKdsPage.js";
 
 export default function App() {
   return (
@@ -78,6 +80,22 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["ATENDENTE", "ADMIN"]}>
                 <OrderPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/production"
+            element={
+              <ProtectedRoute allowedRoles={["PRODUCAO", "ADMIN"]}>
+                <ProductionStationsPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/production/stations/:stationId"
+            element={
+              <ProtectedRoute allowedRoles={["PRODUCAO", "ADMIN"]}>
+                <ProductionKdsPage />
               </ProtectedRoute>
             }
           />

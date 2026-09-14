@@ -6,6 +6,7 @@ import { productsRouter } from "./modules/products/product.routes.js";
 import { productVariationsRouter } from "./modules/product-variations/product-variation.routes.js";
 import { additionalsRouter } from "./modules/additionals/additional.routes.js";
 import { ordersRouter } from "./modules/orders/order.routes.js";
+import { productionRouter } from "./modules/production/production.routes.js";
 import { notFoundHandler } from "./middlewares/notFoundHandler.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
@@ -26,6 +27,7 @@ export function createApp(corsOrigin: string) {
   app.use("/api/products/:productId/variations", productVariationsRouter);
   app.use("/api/additionals", additionalsRouter);
   app.use("/api/orders", ordersRouter);
+  app.use("/api/production", productionRouter);
 
   // Os dois abaixo são sempre os últimos, nesta ordem.
   app.use(notFoundHandler);
