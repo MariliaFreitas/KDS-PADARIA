@@ -1,0 +1,2709 @@
+diff --git a/README.md b/README.md
+index 25aa83a..1a17aee 100644
+--- a/README.md
++++ b/README.md
+@@ -27,9 +27,10 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
+ - [x] **Etapa 10 — Cálculo de preços** (implementada junto da Etapa 9: `OrderItem` exige `basePriceCentsSnapshot`/`totalCents` já congelados na criação, então preço e item nascem juntos — snapshots de produto/variação/adicionais e total em centavos calculado no servidor)
+ - [x] **Etapa 11 — Roteamento para estações** (o roteamento de um item para uma estação é sempre derivado do cadastro atual do produto, nunca do cliente: produto sem produção nunca recebe estação no item, mesmo com `stationId` residual no cadastro; produto com produção exige uma estação ativa configurada — sem isso o item não é criado; a estação é congelada em `stationIdSnapshot`/`stationNameSnapshot` no momento da criação do item e nunca é reescrita depois, mesmo que o produto ou a estação mudem; fila/KDS de produção ficam para a Etapa 12)
+ - [x] **Etapa 12 — Preparo/KDS** (fila de preparo por estação: `GET /api/production/stations`, `GET /api/production/stations/:stationId/items`, `PATCH .../advance`, restrito a PRODUCAO/ADMIN; a fila usa sempre `stationIdSnapshot`/`requiresProductionSnapshot` do item, nunca o cadastro atual do produto; status só avança PENDENTE→EM_PREPARO→PRONTO; tela `/production` para escolher a estação e `/production/stations/:stationId` para o KDS)
+-- [x] **Etapa 13 — Caixa** (conta aberta é só `paymentStatus=PENDENTE` e não cancelado — nenhuma coluna nova para isso; `GET /api/cashier/orders` lista, busca por número operacional (aceita `27` ou `#27`) ou nome do cliente, e traz o resumo dos itens cobráveis de cada pedido (produto, quantidade/peso, variação e adicionais, sempre excluindo itens CANCELADO); `PATCH /api/cashier/orders/:orderId/confirm-payment` confirma pagamento com total sempre recalculado no servidor a partir dos itens não cancelados, restrito a CAIXA/ADMIN; item novo é rejeitado em pedido já pago (`ORDER_ALREADY_PAID`); número operacional (`serviceNumber`) é um número reutilizável e independente do `orderNumber` técnico — alocado por um pool com constraint de unicidade, nunca por contagem em memória, e só volta a ficar disponível 7h depois do pagamento; tela `/cashier` restrita a CAIXA/ADMIN)
+-- [x] **Etapa 14 — Retirada/Entrega** (módulo operacional separado do Caixa, que continua exclusivamente financeiro: `GET /api/delivery/orders` lista pedidos ainda não concluídos operacionalmente — não cancelados, `Order.deliveredAt=null`, com pelo menos um item válido sem entrega — com a mesma busca por número operacional/nome do Caixa; `PATCH /api/delivery/orders/:orderId/items/:itemId/deliver` entrega um item, restrito a CAIXA (ADMIN não é concedido automaticamente nesta etapa); item exige `status=PRONTO` quando `requiresProductionSnapshot=true`, mas item sem produção entrega sem nunca passar por PRONTO; pedido VIAGEM só entrega depois de pago, pedido LOCAL entrega mesmo com pagamento pendente; item CANCELADO nunca é entregue nem bloqueia o fechamento do pedido; `Order.deliveredAt` é preenchido sozinho, dentro da mesma operação transacional, quando o último item válido é entregue — nunca por um endpoint que o frontend chama para declarar o pedido inteiro entregue; entrega registrada no `OrderHistory` com `ITEM_DELIVERED`; item WHATSAPP+VIAGEM ainda não pago não entra em preparo — nem aparece na fila do KDS, nem avança via chamada direta a `advance`, só depois de `paymentStatus=PAGO`; tela `/delivery`)
+-- [x] **Etapa 15 — Histórico** (histórico operacional de pedidos concluídos ou cancelados; `GET /api/history/orders` com paginação, busca por número operacional ou nome do cliente e filtros por período/status; detalhe completo em `GET /api/history/orders/:orderId` com itens, valores, datas e timeline baseada em `OrderHistory`; eventos de criação do pedido, inclusão e mudança de status de itens, pagamento e entrega; acesso restrito a CAIXA/ADMIN; telas `/history` e `/history/orders/:orderId`)
++- [x] **Etapa 13 — Caixa** (conta aberta é só `paymentStatus=PENDENTE` e não cancelado — nenhuma coluna nova para isso; `GET /api/cashier/orders` lista, busca por número operacional (aceita `27` ou `#27`) ou nome do cliente, e traz o resumo dos itens cobráveis de cada pedido (produto, quantidade/peso, variação e adicionais, sempre excluindo itens CANCELADO); `PATCH /api/cashier/orders/:orderId/confirm-payment` confirma pagamento com total sempre recalculado no servidor a partir dos itens não cancelados, restrito a CAIXA/ADMIN; item novo é rejeitado em pedido já pago (`ORDER_ALREADY_PAID`); número operacional (`serviceNumber`) é um número reutilizável e independente do `orderNumber` técnico — alocado por um pool com constraint de unicidade, nunca por contagem em memória. **Atualizado na estabilização pré-Etapa 16:** o número só volta a ficar disponível depois que o pedido dono está *realmente* encerrado — ver Etapa 14 — nunca só por ter sido pago)
++- [x] **Etapa 14 — Retirada/Entrega** (módulo operacional separado do Caixa, que continua exclusivamente financeiro: `GET /api/delivery/orders` lista pedidos ainda não concluídos operacionalmente — não cancelados, `Order.deliveredAt=null`, com pelo menos um item válido sem entrega — com a mesma busca por número operacional/nome do Caixa; `PATCH /api/delivery/orders/:orderId/items/:itemId/deliver` entrega um item, restrito a CAIXA (ADMIN não é concedido automaticamente nesta etapa); item exige `status=PRONTO` quando `requiresProductionSnapshot=true`, mas item sem produção entrega sem nunca passar por PRONTO; pedido VIAGEM só entrega depois de pago, pedido LOCAL entrega mesmo com pagamento pendente; item CANCELADO nunca é entregue nem bloqueia o fechamento do pedido; entrega registrada no `OrderHistory` com `ITEM_DELIVERED`; item WHATSAPP+VIAGEM ainda não pago não entra em preparo — nem aparece na fila do KDS, nem avança via chamada direta a `advance`, só depois de `paymentStatus=PAGO`; tela `/delivery`. **Semântica de `Order.deliveredAt` atualizada na estabilização pré-Etapa 16:** `!= null` significa pedido *integralmente* encerrado, e só passa a valer quando as duas condições são verdadeiras ao mesmo tempo — `paymentStatus=PAGO` **e** nenhum item válido ainda sem entrega. Entregar fisicamente todos os itens não fecha sozinho um pedido ainda `PENDENTE`: um LOCAL pode ter todo item entregue e continuar de conta aberta, aceitando item novo de qualquer ATENDENTE, até o pagamento ser confirmado. O fechamento acontece dentro da transação de `deliverItem` (quando o pagamento já estava confirmado) ou dentro da transação de `confirmPayment` (quando a entrega já estava completa antes do pagamento) — nunca por um endpoint que o frontend chama para declarar o pedido inteiro entregue, e nunca duas vezes sob concorrência entre as duas operações, porque ambas travam a mesma linha do pedido. Um registro anterior a essa estabilização com `paymentStatus=PENDENTE` e `deliveredAt != null` não sofre backfill destrutivo; ao ser pago depois, o `deliveredAt` existente é preservado e o pedido passa a ser considerado encerrado, sem duplicar `ORDER_DELIVERED`)
++- [x] **Etapa 15 — Histórico** (histórico operacional de pedidos concluídos ou cancelados; `GET /api/history/orders` com paginação, busca por número operacional ou nome do cliente e filtros por período/status; detalhe completo em `GET /api/history/orders/:orderId` com itens, valores, datas e timeline baseada em `OrderHistory`; eventos de criação do pedido, inclusão e mudança de status de itens, pagamento e entrega; acesso restrito a CAIXA/ADMIN; telas `/history` e `/history/orders/:orderId`. **Atualizado na estabilização pré-Etapa 16:** um pedido só conta como "entregue" para fins de histórico com `deliveredAt != null` **e** `paymentStatus=PAGO` — protege a listagem e o detalhe contra registros legados `PENDENTE + deliveredAt != null`)
++- [x] **Estabilização pré-Etapa 16** (correção de inconsistências entre Atendimento/Caixa/Entrega/Histórico e reuso do número operacional antes do tempo real — sem nova entidade, sem migration: `GET /api/orders/open` lista pedidos em aberto para o Atendimento — `paymentStatus=PENDENTE`, não cancelado, não entregue — com busca por nome/número operacional, ordenado por mais antigo primeiro, restrito a ATENDENTE/ADMIN, tela `/orders/open`; detalhe do pedido (`GET /api/orders/:orderId`) passa a expor `totalCents` recalculado no servidor; botão "Adicionar outro item" some quando o pedido não está mais apto a receber item (pago, cancelado ou encerrado); `serviceNumber` só é agendado para reuso quando o pedido dono está realmente encerrado, com `reusableAt = max(paidAt + 7h, deliveredAt)`, e `claimReusableSlot` reconfirma essa condição do dono antes de reivindicar um slot, não só `reusableAt <= now`; `pickupTime` é rejeitado quando `channel=BALCAO` e aceito quando `WHATSAPP`; a fila do KDS passa a exibir `pickupTime` do pedido, só como informação visual — sem alterar a ordenação por `includedAt asc`)
+ - [ ] Etapa 16 — Tempo real
+ 
+ ## Stack
+@@ -189,10 +190,17 @@ Registradas aqui porque afetam quem for mexer no código:
+ - **`serviceNumber` é um número operacional separado do `orderNumber`.**
+   Visível ao cliente/caixa/KDS e reutilizável — controlado por um pool
+   (`ServiceNumberSlot`) com constraint de unicidade, nunca por `max+1` sem
+-  proteção. Um número só volta a ficar disponível 7h depois do **pagamento**
+-  do pedido que o usava — cancelamento sozinho não libera o número, essa
+-  etapa não define uma política de liberação por cancelamento. `orderNumber`
+-  continua único e permanente, sem nenhuma relação com esse ciclo de reuso.
++  proteção. Cancelamento sozinho não libera o número — não existe política de
++  liberação por cancelamento. `orderNumber` continua único e permanente, sem
++  nenhuma relação com esse ciclo de reuso. **Atualizado na estabilização
++  pré-Etapa 16:** um número só volta a ficar disponível quando o pedido dono
++  está *realmente* encerrado — `paymentStatus=PAGO` **e** todo item válido
++  entregue (ver `Order.deliveredAt` na Etapa 14) — nunca só por ter sido
++  pago. `reusableAt = max(paidAt + 7h, deliveredAt)`, calculado no momento
++  em que as duas condições passam a valer juntas, e `claimReusableSlot`
++  reconfirma o estado do pedido dono antes de reivindicar um slot (não só
++  `reusableAt <= now`), como defesa contra slots antigos agendados pelo
++  comportamento anterior.
+ - **Conta aberta é só `paymentStatus=PENDENTE` e não cancelado.** Não existe
+   nenhuma coluna própria para esse conceito — é sempre essa mesma consulta.
+ - **Total cobrado no caixa é sempre recalculado no servidor**, somando
+diff --git a/backend/src/modules/cashier/__tests__/cashier-concurrent-payment.test.ts b/backend/src/modules/cashier/__tests__/cashier-concurrent-payment.test.ts
+index 7bd0853..7e60138 100644
+--- a/backend/src/modules/cashier/__tests__/cashier-concurrent-payment.test.ts
++++ b/backend/src/modules/cashier/__tests__/cashier-concurrent-payment.test.ts
+@@ -19,6 +19,7 @@ interface FakeOrderRow {
+   paidAt: Date | null;
+   paidByUserId: string | null;
+   serviceNumber: number;
++  deliveredAt: Date | null;
+ }
+ 
+ interface FakeItemRow {
+@@ -26,6 +27,7 @@ interface FakeItemRow {
+   orderId: string;
+   totalCents: number;
+   status: "PENDENTE" | "CANCELADO";
++  deliveredAt: Date | null;
+ }
+ 
+ function createRaceFakeDb() {
+@@ -166,8 +168,9 @@ describe("corrida entre duas confirmações concorrentes do mesmo pagamento", ()
+       paidAt: null,
+       paidByUserId: null,
+       serviceNumber: 5,
++      deliveredAt: null,
+     });
+-    db.seedItem({ id: "item-1", orderId: "order-1", totalCents: 1000, status: "PENDENTE" });
++    db.seedItem({ id: "item-1", orderId: "order-1", totalCents: 1000, status: "PENDENTE", deliveredAt: null });
+ 
+     const { confirmPayment } = await import("../cashier.service.js");
+ 
+diff --git a/backend/src/modules/cashier/__tests__/cashier.service.test.ts b/backend/src/modules/cashier/__tests__/cashier.service.test.ts
+index 216ffce..8234a5e 100644
+--- a/backend/src/modules/cashier/__tests__/cashier.service.test.ts
++++ b/backend/src/modules/cashier/__tests__/cashier.service.test.ts
+@@ -59,6 +59,7 @@ interface ItemFixture {
+   totalCents: number;
+   observation: string | null;
+   includedAt: Date;
++  deliveredAt: Date | null;
+   additionals: AdditionalFixture[];
+ }
+ 
+@@ -79,6 +80,9 @@ function item(overrides: Partial<ItemFixture> & { id: string; totalCents: number
+     status: "PENDENTE",
+     observation: null,
+     includedAt: new Date("2026-01-01T10:00:00.000Z"),
++    // null por padrão (ainda não entregue) — todo fixture inclui o campo
++    // real mesmo quando null, nunca omitido (convenção deste repositório).
++    deliveredAt: null,
+     additionals: [],
+     ...overrides,
+   };
+@@ -512,32 +516,136 @@ describe("cashier.service", () => {
+       );
+     });
+ 
+-    it("agenda a liberação do número operacional para 7h depois de paidAt", async () => {
+-      const pendingOrder = order({
+-        id: "order-1",
+-        items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO" })],
+-      });
+-      vi.mocked(prisma.order.findUnique)
+-        .mockResolvedValueOnce(pendingOrder)
+-        .mockResolvedValueOnce({ ...pendingOrder, paymentStatus: "PAGO" });
+-      vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
+-      vi.mocked(prisma.serviceNumberSlot.update).mockResolvedValue({
+-        id: "slot-1",
+-        number: 7,
+-        orderId: "order-1",
+-        reusableAt: new Date(),
++    // -----------------------------------------------------------------
++    // Estabilização pré-Etapa 16: fechamento do pedido (Order.deliveredAt,
++    // ORDER_DELIVERED, agendamento de reuso) só acontece dentro de
++    // confirmPayment quando TODO item válido já estava entregue ANTES
++    // deste pagamento. Pagar sozinho nunca fecha um pedido com item válido
++    // ainda pendente de entrega.
++    // -----------------------------------------------------------------
++    describe("fechamento do pedido ao confirmar pagamento (estabilização pré-Etapa 16)", () => {
++      it("quando todo item válido já estava entregue, fecha o pedido, grava ORDER_DELIVERED exatamente uma vez e agenda reusableAt = max(paidAt+7h, deliveredAt)", async () => {
++        // Item entregue ANTES do pagamento (cenário comum: LOCAL entrega
++        // tudo primeiro, paga depois).
++        const pendingOrder = order({
++          id: "order-1",
++          items: [
++            item({
++              id: "item-1",
++              totalCents: 1000,
++              status: "PRONTO",
++              deliveredAt: new Date("2026-01-05T08:00:00.000Z"),
++            }),
++          ],
++        });
++        vi.mocked(prisma.order.findUnique)
++          .mockResolvedValueOnce(pendingOrder)
++          .mockResolvedValueOnce({ ...pendingOrder, paymentStatus: "PAGO" });
++        vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
++        vi.mocked(prisma.serviceNumberSlot.update).mockResolvedValue({
++          id: "slot-1",
++          number: 7,
++          orderId: "order-1",
++          reusableAt: new Date(),
++        });
++
++        await confirmPayment("order-1", "caixa-1");
++
++        // paymentStatus PENDENTE->PAGO + fechamento Order.deliveredAt=null->data:
++        // duas chamadas a updateMany.
++        expect(prisma.order.updateMany).toHaveBeenCalledTimes(2);
++        expect(prisma.order.updateMany).toHaveBeenNthCalledWith(2, {
++          where: { id: "order-1", deliveredAt: null },
++          data: { deliveredAt: expect.any(Date) },
++        });
++
++        expect(prisma.orderHistory.create).toHaveBeenCalledWith({
++          data: { orderId: "order-1", orderItemId: null, action: "ORDER_DELIVERED", userId: "caixa-1" },
++        });
++        const orderDeliveredCalls = vi
++          .mocked(prisma.orderHistory.create)
++          .mock.calls.filter((call: [{ data: { action: string } }]) => call[0].data.action === "ORDER_DELIVERED");
++        expect(orderDeliveredCalls).toHaveLength(1);
++
++        // reusableAt = max(paidAt+7h, deliveredAt-do-fechamento) — como o
++        // item já estava entregue bem antes do pagamento, paidAt+7h vence.
++        expect(prisma.serviceNumberSlot.update).toHaveBeenCalledWith({
++          where: { orderId: "order-1" },
++          data: { reusableAt: expect.any(Date) },
++        });
++        const slotCall = vi.mocked(prisma.serviceNumberSlot.update).mock.calls[0][0];
++        const updateManyCall = vi.mocked(prisma.order.updateMany).mock.calls[0][0];
++        const paidAt = updateManyCall.data.paidAt as Date;
++        expect((slotCall.data.reusableAt as Date).getTime() - paidAt.getTime()).toBe(7 * 60 * 60 * 1000);
+       });
+ 
+-      await confirmPayment("order-1", "caixa-1");
++      it("quando existe item válido ainda sem entrega, paga mas NÃO fecha o pedido, NÃO grava ORDER_DELIVERED e NÃO agenda reuso do número", async () => {
++        const pendingOrder = order({
++          id: "order-1",
++          items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO", deliveredAt: null })],
++        });
++        vi.mocked(prisma.order.findUnique)
++          .mockResolvedValueOnce(pendingOrder)
++          .mockResolvedValueOnce({ ...pendingOrder, paymentStatus: "PAGO" });
++        vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
++
++        const result = await confirmPayment("order-1", "caixa-1");
++
++        expect(result.paymentStatus).toBe("PAGO");
++        // Só a chamada de confirmação de pagamento — nenhuma segunda
++        // chamada de fechamento.
++        expect(prisma.order.updateMany).toHaveBeenCalledTimes(1);
++        const orderDeliveredCalls = vi
++          .mocked(prisma.orderHistory.create)
++          .mock.calls.filter((call: [{ data: { action: string } }]) => call[0].data.action === "ORDER_DELIVERED");
++        expect(orderDeliveredCalls).toHaveLength(0);
++        expect(prisma.serviceNumberSlot.update).not.toHaveBeenCalled();
++      });
+ 
+-      expect(prisma.serviceNumberSlot.update).toHaveBeenCalledWith({
+-        where: { orderId: "order-1" },
+-        data: { reusableAt: expect.any(Date) },
++      it("registro legado (PENDENTE + deliveredAt != null): confirma o pagamento, preserva o deliveredAt existente, não duplica ORDER_DELIVERED e agenda o reuso corretamente", async () => {
++        const legacyDeliveredAt = new Date("2026-01-04T15:00:00.000Z");
++        const pendingOrder = order({
++          id: "order-1",
++          // Comportamento anterior à estabilização: deliveredAt já
++          // preenchido mesmo com o pagamento ainda pendente.
++          deliveredAt: legacyDeliveredAt,
++          items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO", deliveredAt: legacyDeliveredAt })],
++        });
++        vi.mocked(prisma.order.findUnique)
++          .mockResolvedValueOnce(pendingOrder)
++          .mockResolvedValueOnce({ ...pendingOrder, paymentStatus: "PAGO" });
++        vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
++        vi.mocked(prisma.serviceNumberSlot.update).mockResolvedValue({
++          id: "slot-1",
++          number: 7,
++          orderId: "order-1",
++          reusableAt: new Date(),
++        });
++
++        const result = await confirmPayment("order-1", "caixa-1");
++
++        expect(result.paymentStatus).toBe("PAGO");
++        // Nenhum updateMany extra de fechamento — o deliveredAt já existia,
++        // não é reescrito por esta chamada.
++        expect(prisma.order.updateMany).toHaveBeenCalledTimes(1);
++        const orderDeliveredCalls = vi
++          .mocked(prisma.orderHistory.create)
++          .mock.calls.filter((call: [{ data: { action: string } }]) => call[0].data.action === "ORDER_DELIVERED");
++        expect(orderDeliveredCalls).toHaveLength(0);
++
++        // Mas o reuso é agendado agora — é só agora que as duas condições
++        // de fechamento (PAGO + deliveredAt != null) passam a valer juntas.
++        expect(prisma.serviceNumberSlot.update).toHaveBeenCalledWith({
++          where: { orderId: "order-1" },
++          data: { reusableAt: expect.any(Date) },
++        });
++        const slotCall = vi.mocked(prisma.serviceNumberSlot.update).mock.calls[0][0];
++        // reusableAt = max(paidAt+7h, deliveredAt legado) — o deliveredAt
++        // legado é de antes do pagamento, então paidAt+7h vence.
++        const updateManyCall = vi.mocked(prisma.order.updateMany).mock.calls[0][0];
++        const paidAt = updateManyCall.data.paidAt as Date;
++        expect((slotCall.data.reusableAt as Date).getTime() - paidAt.getTime()).toBe(7 * 60 * 60 * 1000);
+       });
+-      const call = vi.mocked(prisma.serviceNumberSlot.update).mock.calls[0][0];
+-      const updateManyCall = vi.mocked(prisma.order.updateMany).mock.calls[0][0];
+-      const paidAt = updateManyCall.data.paidAt as Date;
+-      expect((call.data.reusableAt as Date).getTime() - paidAt.getTime()).toBe(7 * 60 * 60 * 1000);
+     });
+ 
+     it("rejeita com 409 PAYMENT_ALREADY_CONFIRMED quando perde a corrida para outra confirmação concorrente", async () => {
+diff --git a/backend/src/modules/cashier/cashier.service.ts b/backend/src/modules/cashier/cashier.service.ts
+index 13fc5dd..5166e9e 100644
+--- a/backend/src/modules/cashier/cashier.service.ts
++++ b/backend/src/modules/cashier/cashier.service.ts
+@@ -2,7 +2,7 @@ import type { Order, OrderItem, OrderItemAdditional, Prisma } from "@prisma/clie
+ import { prisma } from "../../lib/prisma.js";
+ import { AppError } from "../../lib/app-error.js";
+ import { ErrorCode } from "../../lib/error-codes.js";
+-import { scheduleServiceNumberReuse } from "../orders/service-number.service.js";
++import { scheduleServiceNumberReuseOnClose } from "../orders/service-number.service.js";
+ 
+ export interface CashierOrderItemAdditional {
+   nameSnapshot: string;
+@@ -107,24 +107,52 @@ export async function listOpenOrders(search?: string): Promise<CashierOrder[]> {
+   return orders.map(toCashierOrder);
+ }
+ 
++/**
++ * Semântica definitiva de Order.deliveredAt (estabilização pré-Etapa 16):
++ * significa pedido integralmente encerrado, e só fica != null quando as
++ * DUAS condições são verdadeiras ao mesmo tempo — paymentStatus=PAGO E
++ * nenhum item válido (status != CANCELADO) ainda com deliveredAt=null.
++ * Entregar fisicamente todos os itens não fecha sozinho um pedido ainda
++ * PENDENTE (ver deliverItem, no módulo delivery) — e pagar sozinho também
++ * não fecha um pedido que ainda tem item válido sem entrega.
++ */
++function allBillableItemsDelivered(items: OrderItem[]): boolean {
++  return billableItems(items).every((item) => item.deliveredAt !== null);
++}
++
+ /**
+  * Confirma o pagamento de um pedido: total é sempre recalculado no
+  * servidor a partir dos itens não cancelados (nunca aceita total vindo do
+- * cliente), paymentStatus passa a PAGO, e o número operacional é agendado
+- * para voltar ao pool só 7h depois.
++ * cliente), paymentStatus passa a PAGO.
+  *
+  * Antes de ler qualquer coisa, trava a mesma linha do pedido que
+  * addOrderItem trava (SELECT ... FOR UPDATE) — é essa trava, e não a
+  * checagem de paymentStatus sozinha, que impede um item de ser criado
+  * depois do fechamento financeiro por causa de uma corrida: quem travar
+  * primeiro decide a ordem real dos dois eventos, o outro só continua
+- * depois do commit.
++ * depois do commit. É a MESMA trava que serializa esta função contra
++ * deliverItem (módulo delivery) no mesmo pedido — nenhuma corrida real
++ * entre pagamento e última entrega escapa dela (ver deliverItem para a
++ * outra metade dessa garantia).
+  *
+  * A checagem final ainda usa updateMany com a mesma condição (paymentStatus
+  * ainda PENDENTE, ainda não cancelado) em vez de um update direto, como
+  * segunda camada de defesa — mas com a trava de linha, essa condição já
+  * não deveria falhar por corrida com addOrderItem; ela cobre o caso de
+  * outra confirmação de pagamento concorrente.
++ *
++ * Depois de confirmar o pagamento (estabilização pré-Etapa 16): se o
++ * pedido já tinha Order.deliveredAt != null (registro legado do
++ * comportamento anterior, onde a entrega do último item fechava o pedido
++ * mesmo com pagamento pendente — ver nota em deliverItem), o valor
++ * existente é preservado tal como está, NENHUM ORDER_DELIVERED novo é
++ * gravado (o pedido já tinha esse evento gravado quando a entrega
++ * realmente aconteceu, na época), e o reuso do número é agendado agora,
++ * porque é só agora que as duas condições de fechamento passam a valer ao
++ * mesmo tempo. Caso contrário, só fecha o pedido (grava Order.deliveredAt,
++ * ORDER_DELIVERED e agenda o reuso) se TODOS os itens válidos já
++ * estiverem entregues neste exato momento — senão o pedido fica PAGO mas
++ * em aberto, aguardando a entrega do(s) item(ns) restante(s).
+  */
+ export async function confirmPayment(orderId: string, userId: string): Promise<Order> {
+   return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+@@ -194,7 +222,44 @@ export async function confirmPayment(orderId: string, userId: string): Promise<O
+       },
+     });
+ 
+-    await scheduleServiceNumberReuse(tx, orderId, paidAt);
++    if (order.deliveredAt !== null) {
++      // Registro legado (PENDENTE + deliveredAt != null): não fazemos
++      // backfill destrutivo, preservamos o deliveredAt existente tal como
++      // está e não duplicamos ORDER_DELIVERED (já gravado quando a entrega
++      // realmente aconteceu) — só falta agendar o reuso, porque só agora
++      // (pagamento confirmado) as duas condições de fechamento passam a
++      // valer ao mesmo tempo.
++      await scheduleServiceNumberReuseOnClose(tx, orderId, paidAt, order.deliveredAt);
++    } else if (allBillableItemsDelivered(order.items)) {
++      // Todo item válido já estava entregue antes deste pagamento — é esta
++      // confirmação que faz a transição de aberto para fechado. Reivindica
++      // o fechamento com updateMany condicional (mesmo padrão de
++      // deliverItem): garante exatamente um ORDER_DELIVERED mesmo se, por
++      // alguma razão, outra chamada tivesse fechado o pedido no meio-tempo
++      // (não deveria acontecer sob a trava de linha, mas não depende disso
++      // sozinho).
++      const deliveredAt = new Date();
++      const orderClosedClaim = await tx.order.updateMany({
++        where: { id: orderId, deliveredAt: null },
++        data: { deliveredAt },
++      });
++
++      if (orderClosedClaim.count === 1) {
++        await tx.orderHistory.create({
++          data: {
++            orderId,
++            orderItemId: null,
++            action: "ORDER_DELIVERED",
++            userId,
++          },
++        });
++
++        await scheduleServiceNumberReuseOnClose(tx, orderId, paidAt, deliveredAt);
++      }
++    }
++    // Senão: existe pelo menos um item válido ainda sem entrega — o pedido
++    // fica PAGO, mas Order.deliveredAt continua null e o número operacional
++    // continua reservado (não agendado), até a entrega do restante.
+ 
+     const updated: Order | null = await tx.order.findUnique({ where: { id: orderId } });
+     if (!updated) {
+diff --git a/backend/src/modules/delivery/__tests__/delivery-concurrent-delivery.test.ts b/backend/src/modules/delivery/__tests__/delivery-concurrent-delivery.test.ts
+index 0263453..5b6050f 100644
+--- a/backend/src/modules/delivery/__tests__/delivery-concurrent-delivery.test.ts
++++ b/backend/src/modules/delivery/__tests__/delivery-concurrent-delivery.test.ts
+@@ -19,6 +19,7 @@ interface FakeOrderRow {
+   cancelledAt: Date | null;
+   consumptionType: "LOCAL" | "VIAGEM";
+   paymentStatus: "PENDENTE" | "PAGO";
++  paidAt: Date | null;
+   deliveredAt: Date | null;
+ }
+ 
+@@ -105,6 +106,12 @@ function createRaceFakeDb() {
+           return { id: `history-${historyEntries.length}`, ...data };
+         },
+       },
++      serviceNumberSlot: {
++        async update() {
++          events.push("service-number-reuse-scheduled");
++          return { id: "slot-1", number: 5, orderId: "order-1", reusableAt: new Date() };
++        },
++      },
+     };
+   }
+ 
+@@ -158,11 +165,15 @@ function resetFakeDb() {
+ describe("corrida entre duas entregas concorrentes do mesmo item", () => {
+   it("uma das duas chamadas entrega o item; a outra perde a corrida e recebe 409 ORDER_ITEM_ALREADY_DELIVERED, sem duplicar histórico", async () => {
+     const db = resetFakeDb();
++    // Pedido já PAGO (estabilização pré-Etapa 16): entregar o último item
++    // válido só fecha o pedido quando o pagamento já está confirmado — ver
++    // o teste equivalente com paymentStatus=PENDENTE em delivery.service.test.ts.
+     db.seedOrder({
+       id: "order-1",
+       cancelledAt: null,
+       consumptionType: "LOCAL",
+-      paymentStatus: "PENDENTE",
++      paymentStatus: "PAGO",
++      paidAt: new Date("2026-01-01T12:00:00.000Z"),
+       deliveredAt: null,
+     });
+     db.seedItem({
+@@ -209,6 +220,8 @@ describe("corrida entre duas entregas concorrentes do mesmo item", () => {
+       "ORDER_DELIVERED",
+     ]);
+     expect(db.orders.get("order-1")?.deliveredAt).not.toBeNull();
++    // Reuso do número agendado exatamente uma vez, junto do fechamento.
++    expect(db.events.filter((event) => event === "service-number-reuse-scheduled")).toHaveLength(1);
+   });
+ 
+   it("quando o pedido tem mais de um item, a entrega do último item gera ORDER_DELIVERED exatamente uma vez mesmo sob duas chamadas concorrentes no mesmo item", async () => {
+@@ -217,7 +230,8 @@ describe("corrida entre duas entregas concorrentes do mesmo item", () => {
+       id: "order-1",
+       cancelledAt: null,
+       consumptionType: "LOCAL",
+-      paymentStatus: "PENDENTE",
++      paymentStatus: "PAGO",
++      paidAt: new Date("2026-01-01T12:00:00.000Z"),
+       deliveredAt: null,
+     });
+     // item-2 já entregue de antemão: item-1 é o último item válido ainda
+diff --git a/backend/src/modules/delivery/__tests__/delivery.service.test.ts b/backend/src/modules/delivery/__tests__/delivery.service.test.ts
+index 48dc1ed..d2427fb 100644
+--- a/backend/src/modules/delivery/__tests__/delivery.service.test.ts
++++ b/backend/src/modules/delivery/__tests__/delivery.service.test.ts
+@@ -14,6 +14,9 @@ vi.mock("../../../lib/prisma.js", () => ({
+     orderHistory: {
+       create: vi.fn(),
+     },
++    serviceNumberSlot: {
++      update: vi.fn(),
++    },
+     $transaction: vi.fn(),
+     $queryRaw: vi.fn(),
+   },
+@@ -141,6 +144,12 @@ describe("delivery.service", () => {
+     vi.mocked(prisma.$queryRaw).mockResolvedValue([{ id: "order-1" }]);
+     vi.mocked(prisma.orderItem.updateMany).mockResolvedValue({ count: 1 });
+     vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
++    vi.mocked(prisma.serviceNumberSlot.update).mockResolvedValue({
++      id: "slot-1",
++      number: 7,
++      orderId: "order-1",
++      reusableAt: new Date(),
++    });
+     vi.mocked(prisma.orderHistory.create).mockResolvedValue({
+       id: "history-1",
+       orderId: "order-1",
+@@ -471,10 +480,12 @@ describe("delivery.service", () => {
+       });
+     });
+ 
+-    it("último item válido entregue preenche Order.deliveredAt", async () => {
++    it("último item válido entregue preenche Order.deliveredAt quando o pedido já está PAGO", async () => {
+       vi.mocked(prisma.order.findUnique).mockResolvedValue(
+         order({
+           id: "order-1",
++          paymentStatus: "PAGO",
++          paidAt: new Date("2026-01-01T12:00:00.000Z"),
+           items: [
+             item({ id: "item-1", status: "PENDENTE" }),
+             item({ id: "item-2", status: "PENDENTE", deliveredAt: new Date("2026-01-02T00:00:00.000Z") }),
+@@ -493,10 +504,13 @@ describe("delivery.service", () => {
+       });
+     });
+ 
+-    it("registra ORDER_DELIVERED quando o último item válido é entregue e a reivindicação do fechamento é bem-sucedida (Etapa 15)", async () => {
++    it("registra ORDER_DELIVERED e agenda o reuso do número quando o último item válido é entregue, o pedido já está PAGO e a reivindicação do fechamento é bem-sucedida (Etapa 15 / estabilização pré-Etapa 16)", async () => {
++      const paidAt = new Date("2026-01-01T12:00:00.000Z");
+       vi.mocked(prisma.order.findUnique).mockResolvedValue(
+         order({
+           id: "order-1",
++          paymentStatus: "PAGO",
++          paidAt,
+           items: [
+             item({ id: "item-1", status: "PENDENTE" }),
+             item({ id: "item-2", status: "PENDENTE", deliveredAt: new Date("2026-01-02T00:00:00.000Z") }),
+@@ -520,12 +534,25 @@ describe("delivery.service", () => {
+       });
+       // Exatamente um ITEM_DELIVERED e um ORDER_DELIVERED — nunca mais.
+       expect(prisma.orderHistory.create).toHaveBeenCalledTimes(2);
++
++      // reusableAt = max(paidAt+7h, deliveredAt-do-fechamento) — a entrega
++      // acontece "agora" (bem depois de paidAt), então deliveredAt vence.
++      expect(prisma.serviceNumberSlot.update).toHaveBeenCalledWith({
++        where: { orderId: "order-1" },
++        data: { reusableAt: expect.any(Date) },
++      });
++      const slotCall = vi.mocked(prisma.serviceNumberSlot.update).mock.calls[0][0];
++      expect((slotCall.data.reusableAt as Date).getTime()).toBeGreaterThan(
++        paidAt.getTime() + 7 * 60 * 60 * 1000,
++      );
+     });
+ 
+     it("não registra ORDER_DELIVERED quando a reivindicação do fechamento não encontra mais Order.deliveredAt=null (perdeu a corrida)", async () => {
+       vi.mocked(prisma.order.findUnique).mockResolvedValue(
+         order({
+           id: "order-1",
++          paymentStatus: "PAGO",
++          paidAt: new Date("2026-01-01T12:00:00.000Z"),
+           items: [
+             item({ id: "item-1", status: "PENDENTE" }),
+             item({ id: "item-2", status: "PENDENTE", deliveredAt: new Date("2026-01-02T00:00:00.000Z") }),
+@@ -586,6 +613,8 @@ describe("delivery.service", () => {
+       vi.mocked(prisma.order.findUnique).mockResolvedValue(
+         order({
+           id: "order-1",
++          paymentStatus: "PAGO",
++          paidAt: new Date("2026-01-01T12:00:00.000Z"),
+           items: [
+             item({ id: "item-1", status: "PENDENTE" }),
+             item({ id: "item-2", status: "CANCELADO" }),
+@@ -623,6 +652,46 @@ describe("delivery.service", () => {
+       expect(prisma.order.updateMany).not.toHaveBeenCalled();
+     });
+ 
++    // -----------------------------------------------------------------
++    // Estabilização pré-Etapa 16: entregar fisicamente todos os itens NÃO
++    // fecha sozinho um pedido ainda com paymentStatus=PENDENTE — a conta
++    // continua aberta até o pagamento (ver confirmPayment, que fecha o
++    // pedido nesse instante se for o caso).
++    // -----------------------------------------------------------------
++    it("LOCAL PENDENTE: entregar o último item válido NÃO fecha o pedido, NÃO grava ORDER_DELIVERED e NÃO agenda reuso do número — a conta continua aberta", async () => {
++      vi.mocked(prisma.order.findUnique).mockResolvedValue(
++        order({
++          id: "order-1",
++          consumptionType: "LOCAL",
++          paymentStatus: "PENDENTE",
++          paidAt: null,
++          items: [item({ id: "item-1", status: "PENDENTE" })],
++        }),
++      );
++      vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
++        item({ id: "item-1", deliveredAt: new Date() }),
++      );
++
++      const result = await deliverItem("order-1", "item-1", "caixa-1");
++
++      // O item em si é entregue normalmente...
++      expect(result.deliveredAt).not.toBeNull();
++      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
++        data: {
++          orderId: "order-1",
++          orderItemId: "item-1",
++          action: "ITEM_DELIVERED",
++          newState: "ENTREGUE",
++          userId: "caixa-1",
++        },
++      });
++      // ...mas o pedido continua aberto: nenhuma tentativa de fechamento,
++      // nenhum ORDER_DELIVERED, nenhum agendamento de reuso do número.
++      expect(prisma.order.updateMany).not.toHaveBeenCalled();
++      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(1);
++      expect(prisma.serviceNumberSlot.update).not.toHaveBeenCalled();
++    });
++
+     it("rejeita com 409 ORDER_ITEM_ALREADY_DELIVERED quando perde a corrida para outra entrega concorrente", async () => {
+       vi.mocked(prisma.order.findUnique).mockResolvedValue(
+         order({ id: "order-1", items: [item({ id: "item-1" })] }),
+diff --git a/backend/src/modules/delivery/delivery.service.ts b/backend/src/modules/delivery/delivery.service.ts
+index 31690a1..4c09378 100644
+--- a/backend/src/modules/delivery/delivery.service.ts
++++ b/backend/src/modules/delivery/delivery.service.ts
+@@ -2,6 +2,7 @@ import type { Order, OrderItem, OrderItemAdditional, OrderItemStatus, Prisma } f
+ import { prisma } from "../../lib/prisma.js";
+ import { AppError } from "../../lib/app-error.js";
+ import { ErrorCode } from "../../lib/error-codes.js";
++import { scheduleServiceNumberReuseOnClose } from "../orders/service-number.service.js";
+ 
+ export interface DeliveryOrderItemAdditional {
+   nameSnapshot: string;
+@@ -135,9 +136,22 @@ async function lockOrderForUpdate(tx: Prisma.TransactionClient, orderId: string)
+ 
+ /**
+  * Marca um item como entregue e, se esse era o último item válido (não
+- * cancelado) ainda pendente do pedido, fecha o pedido operacionalmente
+- * (Order.deliveredAt) na mesma transação — nunca por um endpoint separado
+- * que o frontend chama para declarar o pedido inteiro entregue.
++ * cancelado) ainda pendente do pedido E o pedido já estiver com
++ * paymentStatus=PAGO, fecha o pedido operacionalmente (Order.deliveredAt)
++ * na mesma transação — nunca por um endpoint separado que o frontend chama
++ * para declarar o pedido inteiro entregue.
++ *
++ * Semântica definitiva de Order.deliveredAt (estabilização pré-Etapa 16):
++ * significa pedido integralmente encerrado, e só fica != null quando as
++ * DUAS condições são verdadeiras — paymentStatus=PAGO E nenhum item válido
++ * ainda com deliveredAt=null. Entregar fisicamente todos os itens NÃO é
++ * suficiente sozinho: um pedido LOCAL pode ter todos os itens entregues e
++ * continuar com paymentStatus=PENDENTE — a conta continua aberta (outro
++ * ATENDENTE ainda pode incluir item), Order.deliveredAt continua null,
++ * nenhum ORDER_DELIVERED é gravado e o número operacional não é liberado
++ * nem agendado. Só quando o pagamento for confirmado depois (ver
++ * confirmPayment, módulo cashier) — e a essa altura todo item válido já
++ * estiver entregue — é que o pedido finalmente fecha.
+  *
+  * Nenhuma das regras abaixo é decidida pelo frontend: tudo é reconferido
+  * aqui, depois de travar a linha do pedido.
+@@ -239,9 +253,10 @@ export async function deliverItem(
+       },
+     });
+ 
+-    // Fecha o pedido quando não sobrar nenhum item válido ainda pendente.
+-    // Usa a lista de itens já lida dentro desta mesma transação travada —
+-    // com o item recém-entregue contado como entregue mesmo sem
++    // Fecha o pedido quando não sobrar nenhum item válido ainda pendente
++    // E o pedido já estiver pago (estabilização pré-Etapa 16 — ver nota
++    // acima). Usa a lista de itens já lida dentro desta mesma transação
++    // travada — com o item recém-entregue contado como entregue mesmo sem
+     // reconsultar o banco — porque, sob a trava de linha do pedido,
+     // nenhuma outra transação pode ter alterado outro item deste pedido
+     // nesse meio-tempo. Item CANCELADO nunca bloqueia esse fechamento.
+@@ -252,7 +267,7 @@ export async function deliverItem(
+         candidate.deliveredAt === null,
+     );
+ 
+-    if (!hasRemainingUndeliveredItem) {
++    if (!hasRemainingUndeliveredItem && order.paymentStatus === "PAGO") {
+       // updateMany condicional (where: deliveredAt: null) como reivindicação
+       // de quem realmente fecha o pedido: sob concorrência, só uma chamada
+       // encontra Order.deliveredAt ainda null e consegue de fato transicioná-lo
+@@ -274,8 +289,21 @@ export async function deliverItem(
+             userId,
+           },
+         });
++
++        // order.paidAt não pode ser null aqui: paymentStatus=PAGO só é
++        // atingido em confirmPayment, que sempre grava paidAt na mesma
++        // transação que grava paymentStatus — nunca um sem o outro.
++        if (order.paidAt) {
++          await scheduleServiceNumberReuseOnClose(tx, orderId, order.paidAt, deliveredAt);
++        }
+       }
+     }
++    // Senão (paymentStatus ainda PENDENTE, mesmo sem sobrar item válido não
++    // entregue): o pedido fica com todos os itens fisicamente entregues,
++    // mas Order.deliveredAt continua null, nenhum ORDER_DELIVERED é gravado
++    // e o número operacional continua reservado — a conta segue aberta até
++    // o pagamento (ver confirmPayment, que fecha o pedido nesse instante se
++    // for o caso).
+ 
+     const updated = await tx.orderItem.findUnique({ where: { id: itemId } });
+     if (!updated) {
+diff --git a/backend/src/modules/history/__tests__/history.service.test.ts b/backend/src/modules/history/__tests__/history.service.test.ts
+index b19ef1f..d1f50c2 100644
+--- a/backend/src/modules/history/__tests__/history.service.test.ts
++++ b/backend/src/modules/history/__tests__/history.service.test.ts
+@@ -164,7 +164,7 @@ describe("history.service", () => {
+   });
+ 
+   describe("listHistoryOrders", () => {
+-    it("consulta só pedidos fechados operacionalmente (deliveredAt != null OR cancelledAt != null)", async () => {
++    it("consulta só pedidos fechados operacionalmente (deliveredAt != null E paymentStatus=PAGO, OU cancelledAt != null)", async () => {
+       vi.mocked(prisma.order.findMany).mockResolvedValue([]);
+       vi.mocked(prisma.order.count).mockResolvedValue(0);
+ 
+@@ -173,20 +173,26 @@ describe("history.service", () => {
+       expect(prisma.order.findMany).toHaveBeenCalledWith(
+         expect.objectContaining({
+           where: expect.objectContaining({
+-            OR: [{ deliveredAt: { not: null } }, { cancelledAt: { not: null } }],
++            OR: [
++              { deliveredAt: { not: null }, paymentStatus: "PAGO" },
++              { cancelledAt: { not: null } },
++            ],
+           }),
+         }),
+       );
+       expect(prisma.order.count).toHaveBeenCalledWith(
+         expect.objectContaining({
+           where: expect.objectContaining({
+-            OR: [{ deliveredAt: { not: null } }, { cancelledAt: { not: null } }],
++            OR: [
++              { deliveredAt: { not: null }, paymentStatus: "PAGO" },
++              { cancelledAt: { not: null } },
++            ],
+           }),
+         }),
+       );
+     });
+ 
+-    it("pagamento PAGO sozinho não é suficiente — a condição de fechamento nunca inclui paymentStatus", async () => {
++    it("pagamento PAGO sozinho não é suficiente — paymentStatus só entra combinado com deliveredAt (nunca sozinho no nível superior de where)", async () => {
+       vi.mocked(prisma.order.findMany).mockResolvedValue([]);
+       vi.mocked(prisma.order.count).mockResolvedValue(0);
+ 
+@@ -202,10 +208,16 @@ describe("history.service", () => {
+         throw new Error("Era esperado um argumento na chamada a prisma.order.findMany.");
+       }
+ 
++      // paymentStatus nunca aparece como filtro solto no nível superior de
++      // where — só combinado com deliveredAt dentro da condição OR de
++      // fechamento (ou, com status=ENTREGUE, replicado junto de
++      // where.deliveredAt — ver teste abaixo). Isso garante que um pedido
++      // PAGO mas ainda aberto (nem entregue nem cancelado) nunca é
++      // devolvido pelo Histórico.
+       expect(firstArgs.where).not.toHaveProperty("paymentStatus");
+     });
+ 
+-    it("filtra por status=ENTREGUE restringindo a deliveredAt != null", async () => {
++    it("filtra por status=ENTREGUE restringindo a deliveredAt != null E paymentStatus=PAGO (blinda contra registro legado PENDENTE+deliveredAt preenchido)", async () => {
+       vi.mocked(prisma.order.findMany).mockResolvedValue([]);
+       vi.mocked(prisma.order.count).mockResolvedValue(0);
+ 
+@@ -213,7 +225,10 @@ describe("history.service", () => {
+ 
+       expect(prisma.order.findMany).toHaveBeenCalledWith(
+         expect.objectContaining({
+-          where: expect.objectContaining({ deliveredAt: { not: null } }),
++          where: expect.objectContaining({
++            deliveredAt: { not: null },
++            paymentStatus: "PAGO",
++          }),
+         }),
+       );
+     });
+@@ -255,7 +270,10 @@ describe("history.service", () => {
+       expect(prisma.order.findMany).toHaveBeenCalledWith(
+         expect.objectContaining({
+           where: expect.objectContaining({
+-            OR: [{ deliveredAt: { not: null } }, { cancelledAt: { not: null } }],
++            OR: [
++              { deliveredAt: { not: null }, paymentStatus: "PAGO" },
++              { cancelledAt: { not: null } },
++            ],
+             AND: [
+               {
+                 OR: [
+@@ -382,6 +400,24 @@ describe("history.service", () => {
+       });
+     });
+ 
++    it("registro legado (paymentStatus PENDENTE + deliveredAt preenchido) nunca é aceito como histórico entregue, mesmo acessando a URL de detalhe diretamente pelo id — 404 ORDER_NOT_FOUND", async () => {
++      vi.mocked(prisma.order.findUnique).mockResolvedValue(
++        orderDetail({
++          id: "order-1",
++          paymentStatus: "PENDENTE",
++          paidAt: null,
++          deliveredAt: new Date("2026-01-01T10:00:00.000Z"),
++          cancelledAt: null,
++          items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO", deliveredAt: new Date() })],
++        }),
++      );
++
++      await expect(getHistoryOrderDetail("order-1")).rejects.toMatchObject({
++        statusCode: 404,
++        code: "ORDER_NOT_FOUND",
++      });
++    });
++
+     it("retorna pedido entregue com itens (inclusive CANCELADO) e total recalculado excluindo cancelados", async () => {
+       vi.mocked(prisma.order.findUnique).mockResolvedValue(
+         orderDetail({
+diff --git a/backend/src/modules/history/history.service.ts b/backend/src/modules/history/history.service.ts
+index 75c042d..9853e16 100644
+--- a/backend/src/modules/history/history.service.ts
++++ b/backend/src/modules/history/history.service.ts
+@@ -147,11 +147,22 @@ function toHistorySummary(order: OrderWithItemsOnly): HistoryOrderSummary {
+ }
+ 
+ /**
+- * Lista pedidos já fechados operacionalmente — entregues (deliveredAt !=
+- * null) ou cancelados (cancelledAt != null). Pagamento PAGO sozinho NUNCA
+- * define histórico: um pedido pago mas ainda em aberto (nem entregue nem
+- * cancelado) continua fora daqui, porque ainda pode mudar (novo item,
+- * entrega pendente) — ver Caixa/Retirada para esse estado.
++ * Lista pedidos já fechados operacionalmente — entregues ou cancelados
++ * (cancelledAt != null). Pagamento PAGO sozinho NUNCA define histórico: um
++ * pedido pago mas ainda em aberto (nem entregue nem cancelado) continua
++ * fora daqui, porque ainda pode mudar (novo item, entrega pendente) — ver
++ * Caixa/Retirada para esse estado.
++ *
++ * "Entregue" para fins de histórico (estabilização pré-Etapa 16) exige as
++ * DUAS condições ao mesmo tempo: deliveredAt != null E paymentStatus=PAGO —
++ * mesma semântica definitiva de Order.deliveredAt usada em todo o sistema
++ * (ver cashier.service.ts/delivery.service.ts). Isso existe especificamente
++ * para blindar o Histórico contra registros legados do comportamento
++ * anterior, onde deliveredAt podia ficar preenchido com paymentStatus ainda
++ * PENDENTE — esse registro legado nunca aparece aqui como "entregue" (nem
++ * na listagem, nem no detalhe — ver getHistoryOrderDetail). Nenhum backfill
++ * destrutivo é feito: o dado antigo continua no banco como está, só não é
++ * apresentado como histórico de entrega.
+  *
+  * Busca opcional por nome (substring, sem diferenciar maiúsculas/
+  * minúsculas) ou número operacional exato (aceita "27"/"#27") — como o
+@@ -169,11 +180,15 @@ export async function listHistoryOrders(
+   params: ListHistoryOrdersParams,
+ ): Promise<ListHistoryOrdersResult> {
+   const where: Prisma.OrderWhereInput = {
+-    OR: [{ deliveredAt: { not: null } }, { cancelledAt: { not: null } }],
++    OR: [
++      { deliveredAt: { not: null }, paymentStatus: "PAGO" },
++      { cancelledAt: { not: null } },
++    ],
+   };
+ 
+   if (params.status === "ENTREGUE") {
+     where.deliveredAt = { not: null };
++    where.paymentStatus = "PAGO";
+   } else if (params.status === "CANCELADO") {
+     where.cancelledAt = { not: null };
+   }
+@@ -310,6 +325,14 @@ function toHistoryOrderDetail(order: OrderWithFullDetail): HistoryOrderDetail {
+  * já usado em outros módulos (ex: produção) para não vazar em qual estado
+  * exato um pedido fora de escopo está.
+  *
++ * Mesma defesa da listagem (estabilização pré-Etapa 16): um pedido só conta
++ * como "entregue" aqui se deliveredAt != null E paymentStatus=PAGO. Um
++ * registro legado PENDENTE + deliveredAt != null NUNCA é aceito como
++ * histórico entregue, mesmo acessando a URL de detalhe diretamente pelo
++ * id — recebe 404 igual a um pedido que nunca foi fechado. Pedido cancelado
++ * continua seguindo só a regra de cancelamento já existente (cancelledAt !=
++ * null), sem depender do pagamento.
++ *
+  * Itens CANCELADO aparecem normalmente na lista de itens (não somem) — só
+  * não entram no total recalculado. O histórico vem ordenado por createdAt
+  * ASC (ordem cronológica real dos eventos), cada entrada com o responsável
+@@ -336,7 +359,11 @@ export async function getHistoryOrderDetail(orderId: string): Promise<HistoryOrd
+     },
+   });
+ 
+-  if (!order || (order.deliveredAt === null && order.cancelledAt === null)) {
++  const isCancelledHistory = order !== null && order.cancelledAt !== null;
++  const isDeliveredHistory =
++    order !== null && order.deliveredAt !== null && order.paymentStatus === "PAGO";
++
++  if (!order || (!isCancelledHistory && !isDeliveredHistory)) {
+     throw new AppError("Pedido não encontrado.", 404, ErrorCode.ORDER_NOT_FOUND);
+   }
+ 
+diff --git a/backend/src/modules/orders/__tests__/order.routes.test.ts b/backend/src/modules/orders/__tests__/order.routes.test.ts
+index 4d508a8..2d01b32 100644
+--- a/backend/src/modules/orders/__tests__/order.routes.test.ts
++++ b/backend/src/modules/orders/__tests__/order.routes.test.ts
+@@ -1,10 +1,12 @@
+ import { describe, it, expect, vi, beforeEach } from "vitest";
+ import request from "supertest";
+ import jwt from "jsonwebtoken";
++import type { Order } from "@prisma/client";
+ 
+ vi.mock("../order.service.js", () => ({
+   createOrder: vi.fn(),
+   getOrderById: vi.fn(),
++  listOpenOrders: vi.fn(),
+ }));
+ 
+ import { createApp } from "../../../app.js";
+@@ -12,6 +14,7 @@ import { AppError } from "../../../lib/app-error.js";
+ import { ErrorCode } from "../../../lib/error-codes.js";
+ import { env } from "../../../config/env.js";
+ import * as orderService from "../order.service.js";
++import type { OrderDetail } from "../order.service.js";
+ 
+ const app = createApp("http://localhost:5173");
+ 
+@@ -50,6 +53,34 @@ const baseOrder = {
+   createdAt: "2026-01-01T00:00:00.000Z",
+ };
+ 
++/**
++ * Fixture tipada de verdade (Order real do Prisma, não o objeto solto
++ * `baseOrder` acima) — usada só nos testes novos desta estabilização, para
++ * não depender de "as never" ao mockar retornos de createOrder/
++ * getOrderById.
++ */
++function orderFixture(overrides: Partial<Order> = {}): Order {
++  return {
++    id: "order-1",
++    orderNumber: 154,
++    serviceNumber: 12,
++    customerName: "Maria",
++    channel: "BALCAO",
++    consumptionType: "LOCAL",
++    pickupTime: null,
++    paymentStatus: "PENDENTE",
++    paidAt: null,
++    paidByUserId: null,
++    cancelledAt: null,
++    cancelReason: null,
++    cancelledByUserId: null,
++    deliveredAt: null,
++    createdByUserId: "atendente-1",
++    createdAt: new Date("2026-01-01T00:00:00.000Z"),
++    ...overrides,
++  };
++}
++
+ describe("/api/orders", () => {
+   beforeEach(() => {
+     vi.clearAllMocks();
+@@ -241,6 +272,50 @@ describe("/api/orders", () => {
+       expect(orderService.createOrder).not.toHaveBeenCalled();
+     });
+ 
++    // Estabilização pré-Etapa 16, item 13: o frontend já limpa pickupTime
++    // ao trocar para BALCAO, mas o backend não confia nisso.
++    it("retorna 400 quando BALCAO é enviado com pickupTime não nulo", async () => {
++      const response = await request(app)
++        .post("/api/orders")
++        .set("Authorization", `Bearer ${atendenteToken}`)
++        .send({
++          customerName: "Maria",
++          channel: "BALCAO",
++          consumptionType: "LOCAL",
++          pickupTime: "2026-02-01T18:00:00.000Z",
++        });
++
++      expect(response.status).toBe(400);
++      expect(response.body.code).toBe(ErrorCode.VALIDATION_ERROR);
++      expect(orderService.createOrder).not.toHaveBeenCalled();
++    });
++
++    it("aceita BALCAO sem pickupTime (nulo/omitido)", async () => {
++      vi.mocked(orderService.createOrder).mockResolvedValue(orderFixture());
++
++      const response = await request(app)
++        .post("/api/orders")
++        .set("Authorization", `Bearer ${atendenteToken}`)
++        .send({ customerName: "Maria", channel: "BALCAO", consumptionType: "LOCAL", pickupTime: null });
++
++      expect(response.status).toBe(201);
++      expect(orderService.createOrder).toHaveBeenCalledWith(
++        expect.objectContaining({ pickupTime: null }),
++        expect.any(String),
++      );
++    });
++
++    it("aceita WHATSAPP com pickupTime nulo (opcional, sem exigência)", async () => {
++      vi.mocked(orderService.createOrder).mockResolvedValue(orderFixture());
++
++      const response = await request(app)
++        .post("/api/orders")
++        .set("Authorization", `Bearer ${atendenteToken}`)
++        .send({ customerName: "Maria", channel: "WHATSAPP", consumptionType: "LOCAL", pickupTime: null });
++
++      expect(response.status).toBe(201);
++    });
++
+     it("usa o id do usuário autenticado como createdByUserId, ignorando o corpo", async () => {
+       vi.mocked(orderService.createOrder).mockResolvedValue(baseOrder as never);
+ 
+@@ -389,5 +464,92 @@ describe("/api/orders", () => {
+       expect(response.status).toBe(403);
+       expect(orderService.getOrderById).not.toHaveBeenCalled();
+     });
++
++    // Estabilização pré-Etapa 16, item 9: instalação única de padaria, sem
++    // garçom/mesa/comanda — qualquer ATENDENTE pode continuar qualquer
++    // pedido aberto, não só quem criou.
++    it("permite a um ATENDENTE diferente do que criou o pedido acessar o mesmo pedido normalmente", async () => {
++      const detail: OrderDetail = {
++        ...orderFixture({ createdByUserId: "atendente-1" }),
++        items: [],
++        totalCents: 1000,
++      };
++      vi.mocked(orderService.getOrderById).mockResolvedValue(detail);
++      const outroAtendenteToken = tokenFor("ATENDENTE", "atendente-2");
++
++      const response = await request(app)
++        .get("/api/orders/order-1")
++        .set("Authorization", `Bearer ${outroAtendenteToken}`);
++
++      expect(response.status).toBe(200);
++      expect(response.body.id).toBe("order-1");
++    });
++  });
++
++  describe("GET /api/orders/open", () => {
++    it("retorna 401 sem autenticação", async () => {
++      const response = await request(app).get("/api/orders/open");
++
++      expect(response.status).toBe(401);
++      expect(orderService.listOpenOrders).not.toHaveBeenCalled();
++    });
++
++    it("retorna 403 para CAIXA", async () => {
++      const response = await request(app)
++        .get("/api/orders/open")
++        .set("Authorization", `Bearer ${caixaToken}`);
++
++      expect(response.status).toBe(403);
++      expect(orderService.listOpenOrders).not.toHaveBeenCalled();
++    });
++
++    it("retorna 403 para PRODUCAO", async () => {
++      const response = await request(app)
++        .get("/api/orders/open")
++        .set("Authorization", `Bearer ${producaoToken}`);
++
++      expect(response.status).toBe(403);
++      expect(orderService.listOpenOrders).not.toHaveBeenCalled();
++    });
++
++    it("permite ATENDENTE listar pedidos em aberto", async () => {
++      vi.mocked(orderService.listOpenOrders).mockResolvedValue([]);
++
++      const response = await request(app)
++        .get("/api/orders/open")
++        .set("Authorization", `Bearer ${atendenteToken}`);
++
++      expect(response.status).toBe(200);
++      expect(response.body).toEqual([]);
++    });
++
++    it("permite ADMIN listar pedidos em aberto", async () => {
++      vi.mocked(orderService.listOpenOrders).mockResolvedValue([]);
++
++      const response = await request(app)
++        .get("/api/orders/open")
++        .set("Authorization", `Bearer ${adminToken}`);
++
++      expect(response.status).toBe(200);
++    });
++
++    it("a rota estática /open nunca é interpretada como um :orderId", async () => {
++      vi.mocked(orderService.listOpenOrders).mockResolvedValue([]);
++
++      await request(app).get("/api/orders/open").set("Authorization", `Bearer ${atendenteToken}`);
++
++      expect(orderService.getOrderById).not.toHaveBeenCalled();
++      expect(orderService.listOpenOrders).toHaveBeenCalledTimes(1);
++    });
++
++    it("repassa o parâmetro search para o service", async () => {
++      vi.mocked(orderService.listOpenOrders).mockResolvedValue([]);
++
++      await request(app)
++        .get("/api/orders/open?search=Maria")
++        .set("Authorization", `Bearer ${atendenteToken}`);
++
++      expect(orderService.listOpenOrders).toHaveBeenCalledWith("Maria");
++    });
+   });
+ });
+diff --git a/backend/src/modules/orders/__tests__/order.service.test.ts b/backend/src/modules/orders/__tests__/order.service.test.ts
+index fa5b4b7..6f2c74a 100644
+--- a/backend/src/modules/orders/__tests__/order.service.test.ts
++++ b/backend/src/modules/orders/__tests__/order.service.test.ts
+@@ -6,6 +6,7 @@ vi.mock("../../../lib/prisma.js", () => ({
+       create: vi.fn(),
+       update: vi.fn(),
+       findUnique: vi.fn(),
++      findMany: vi.fn(),
+     },
+     serviceNumberSlot: {
+       findFirst: vi.fn(),
+@@ -20,7 +21,7 @@ vi.mock("../../../lib/prisma.js", () => ({
+ }));
+ 
+ import { prisma } from "../../../lib/prisma.js";
+-import { createOrder, getOrderById } from "../order.service.js";
++import { createOrder, getOrderById, listOpenOrders } from "../order.service.js";
+ 
+ function uniqueConstraintError(): Error & { code: string } {
+   return Object.assign(new Error("Unique constraint failed on the fields: (`number`)"), {
+@@ -235,7 +236,15 @@ describe("order.service", () => {
+ 
+       expect(prisma.serviceNumberSlot.create).not.toHaveBeenCalled();
+       expect(prisma.serviceNumberSlot.updateMany).toHaveBeenCalledWith({
+-        where: { id: "slot-3", reusableAt: { lte: expect.any(Date) } },
++        where: {
++          id: "slot-3",
++          reusableAt: { lte: expect.any(Date) },
++          order: {
++            paymentStatus: "PAGO",
++            paidAt: { not: null },
++            deliveredAt: { not: null },
++          },
++        },
+         data: { orderId: "order-1", reusableAt: null },
+       });
+       expect(result.serviceNumber).toBe(3);
+@@ -354,5 +363,141 @@ describe("order.service", () => {
+         code: "ORDER_NOT_FOUND",
+       });
+     });
++
++    it("expõe totalCents recalculado no backend, somando só os itens não CANCELADO (estabilização pré-Etapa 16)", async () => {
++      const billableItem = {
++        id: "item-1",
++        orderId: "order-1",
++        productId: "product-1",
++        productNameSnapshot: "Pão francês",
++        saleType: "UNIT" as const,
++        basePriceCentsSnapshot: 500,
++        requiresProductionSnapshot: false,
++        quantity: 2,
++        weightGrams: null,
++        variationId: null,
++        variationNameSnapshot: null,
++        stationIdSnapshot: null,
++        stationNameSnapshot: null,
++        status: "PENDENTE" as const,
++        totalCents: 1000,
++        observation: null,
++        includedAt: new Date("2026-01-01T10:00:00.000Z"),
++        deliveredAt: null,
++        additionals: [],
++      };
++      const cancelledItem = { ...billableItem, id: "item-2", status: "CANCELADO" as const, totalCents: 700 };
++      vi.mocked(prisma.order.findUnique).mockResolvedValue({
++        ...baseOrder,
++        serviceNumber: 1,
++        items: [billableItem, cancelledItem],
++      });
++
++      const result = await getOrderById("order-1");
++
++      expect(result.totalCents).toBe(1000);
++    });
++  });
++
++  describe("listOpenOrders", () => {
++    it("consulta pedidos com paymentStatus=PENDENTE, não cancelados, não entregues, ordenados por createdAt asc e id asc", async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([]);
++
++      await listOpenOrders();
++
++      expect(prisma.order.findMany).toHaveBeenCalledWith({
++        where: { paymentStatus: "PENDENTE", cancelledAt: null, deliveredAt: null },
++        orderBy: [{ createdAt: "asc" }, { id: "asc" }],
++        include: { items: { select: { status: true, totalCents: true } } },
++      });
++    });
++
++    it("soma só os itens não CANCELADO no totalCents", async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([
++        {
++          ...baseOrder,
++          id: "order-1",
++          items: [
++            { status: "PENDENTE", totalCents: 1000 },
++            { status: "CANCELADO", totalCents: 500 },
++            { status: "PRONTO", totalCents: 300 },
++          ],
++        },
++      ]);
++
++      const result = await listOpenOrders();
++
++      expect(result).toHaveLength(1);
++      expect(result[0].totalCents).toBe(1300);
++    });
++
++    it("expõe só o resumo mínimo (sem orderNumber, sem itens completos)", async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([
++        { ...baseOrder, id: "order-1", serviceNumber: 42, orderNumber: 999, items: [] },
++      ]);
++
++      const result = await listOpenOrders();
++
++      expect(result[0]).toEqual({
++        id: "order-1",
++        serviceNumber: 42,
++        customerName: "Maria",
++        channel: "BALCAO",
++        consumptionType: "LOCAL",
++        createdAt: new Date("2026-01-01T00:00:00.000Z"),
++        pickupTime: null,
++        totalCents: 0,
++      });
++      expect(result[0]).not.toHaveProperty("orderNumber");
++      expect(result[0]).not.toHaveProperty("items");
++    });
++
++    it("busca por número operacional exato quando o texto é um inteiro", async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([]);
++
++      await listOpenOrders("27");
++
++      expect(prisma.order.findMany).toHaveBeenCalledWith(
++        expect.objectContaining({
++          where: expect.objectContaining({ OR: expect.arrayContaining([{ serviceNumber: 27 }]) }),
++        }),
++      );
++    });
++
++    it('busca por "#27" normaliza o # antes de interpretar como número operacional', async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([]);
++
++      await listOpenOrders("#27");
++
++      expect(prisma.order.findMany).toHaveBeenCalledWith(
++        expect.objectContaining({
++          where: expect.objectContaining({ OR: expect.arrayContaining([{ serviceNumber: 27 }]) }),
++        }),
++      );
++    });
++
++    it("busca por nome do cliente (substring, case-insensitive) quando o texto não é um inteiro — nunca tratada como substring de número", async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([]);
++
++      await listOpenOrders("mar");
++
++      expect(prisma.order.findMany).toHaveBeenCalledWith(
++        expect.objectContaining({
++          where: expect.objectContaining({
++            OR: [{ customerName: { contains: "mar", mode: "insensitive" } }],
++          }),
++        }),
++      );
++    });
++
++    it("ignora busca vazia ou só espaços", async () => {
++      vi.mocked(prisma.order.findMany).mockResolvedValue([]);
++
++      await listOpenOrders("   ");
++
++      const call = vi.mocked(prisma.order.findMany).mock.calls[0]?.[0];
++      if (!call) throw new Error("order.findMany não foi chamado");
++      expect(call.where).not.toHaveProperty("OR");
++    });
+   });
+ });
+diff --git a/backend/src/modules/orders/__tests__/payment-delivery-race.test.ts b/backend/src/modules/orders/__tests__/payment-delivery-race.test.ts
+new file mode 100644
+index 0000000..13dadb4
+--- /dev/null
++++ b/backend/src/modules/orders/__tests__/payment-delivery-race.test.ts
+@@ -0,0 +1,293 @@
++import { describe, it, expect, vi } from "vitest";
++
++/**
++ * Estabilização pré-Etapa 16, item 7: corrida entre confirmPayment
++ * (módulo cashier) e deliverItem (módulo delivery) no MESMO pedido —
++ * cenário crítico porque as duas operações vivem em módulos diferentes,
++ * mas precisam terminar num estado final consistente independentemente de
++ * qual delas "vence".
++ *
++ * Estado inicial em todos os testes: pedido LOCAL, paymentStatus=PENDENTE,
++ * Order.deliveredAt=null, último item válido ainda não entregue.
++ *
++ * Cobre as duas ordens lógicas de forma DETERMINÍSTICA (chamando uma
++ * operação até o fim, depois a outra — sem depender de nenhum agendamento
++ * de Promise.all) e, adicionalmente, um teste de corrida real entre as
++ * duas funções de verdade (não simulada por sequenciamento explícito),
++ * usando o mesmo mecanismo de fake DB com mutex por orderId (reproduzindo
++ * SELECT ... FOR UPDATE) já usado em cashier-concurrent-payment.test.ts e
++ * delivery-concurrent-delivery.test.ts — como as duas travam a mesma linha
++ * do pedido como primeira coisa que fazem, a ordem em que cada uma é
++ * disparada (a primeira do array, que roda de forma síncrona até a
++ * primeira espera real) decide deterministicamente quem trava primeiro.
++ *
++ * Resultado final exigido, em TODOS os casos: paymentStatus=PAGO, paidAt
++ * preenchido, item entregue, Order.deliveredAt preenchido, exatamente 1
++ * PAYMENT_CONFIRMED, exatamente 1 ITEM_DELIVERED, exatamente 1
++ * ORDER_DELIVERED, serviceNumber agendado corretamente, nenhum metadado
++ * sobrescrito por chamada duplicada.
++ */
++
++interface FakeOrderRow {
++  id: string;
++  paymentStatus: "PENDENTE" | "PAGO";
++  paidAt: Date | null;
++  paidByUserId: string | null;
++  cancelledAt: Date | null;
++  consumptionType: "LOCAL" | "VIAGEM";
++  deliveredAt: Date | null;
++}
++
++interface FakeItemRow {
++  id: string;
++  orderId: string;
++  totalCents: number;
++  status: "PENDENTE" | "CANCELADO";
++  requiresProductionSnapshot: boolean;
++  deliveredAt: Date | null;
++}
++
++function createSharedFakeDb() {
++  const orders = new Map<string, FakeOrderRow>();
++  const items = new Map<string, FakeItemRow>();
++  const historyEntries: Array<{
++    orderId: string;
++    orderItemId: string | null;
++    action: string;
++    previousState?: string | null;
++    newState?: string | null;
++    userId: string;
++  }> = [];
++  const reuseScheduledCalls: Array<{ orderId: string; reusableAt: Date }> = [];
++  const lockQueues = new Map<string, Promise<void>>();
++
++  async function acquireOrderLock(orderId: string, registerRelease: (release: () => void) => void) {
++    const previousTail = lockQueues.get(orderId) ?? Promise.resolve();
++    let release!: () => void;
++    const myTurn = new Promise<void>((resolve) => {
++      release = resolve;
++    });
++    lockQueues.set(
++      orderId,
++      previousTail.then(() => myTurn),
++    );
++    await previousTail;
++    registerRelease(release);
++  }
++
++  function makeTx(locksHeld: Array<() => void>) {
++    return {
++      async $queryRaw(_strings: TemplateStringsArray, orderId: string) {
++        await acquireOrderLock(orderId, (release) => locksHeld.push(release));
++        return [{ id: orderId }];
++      },
++      order: {
++        async findUnique({ where: { id } }: { where: { id: string } }) {
++          const order = orders.get(id);
++          if (!order) return null;
++          return { ...order, items: [...items.values()].filter((item) => item.orderId === id) };
++        },
++        async updateMany({
++          where,
++          data,
++        }: {
++          where: { id: string; paymentStatus?: string; cancelledAt?: null; deliveredAt?: null };
++          data: Partial<FakeOrderRow>;
++        }) {
++          const order = orders.get(where.id);
++          if (!order) return { count: 0 };
++
++          if (where.paymentStatus !== undefined) {
++            if (order.paymentStatus !== where.paymentStatus || order.cancelledAt !== null) {
++              return { count: 0 };
++            }
++            Object.assign(order, data);
++            return { count: 1 };
++          }
++
++          // Reivindicação de fechamento: where.deliveredAt === null.
++          if (order.deliveredAt !== null) return { count: 0 };
++          Object.assign(order, data);
++          return { count: 1 };
++        },
++      },
++      orderItem: {
++        async updateMany({
++          where,
++          data,
++        }: {
++          where: { id: string; deliveredAt: null };
++          data: Partial<FakeItemRow>;
++        }) {
++          const item = items.get(where.id);
++          if (!item || item.deliveredAt !== null) return { count: 0 };
++          Object.assign(item, data);
++          return { count: 1 };
++        },
++        async findUnique({ where: { id } }: { where: { id: string } }) {
++          const item = items.get(id);
++          return item ? { ...item } : null;
++        },
++      },
++      orderHistory: {
++        async create({ data }: { data: (typeof historyEntries)[number] }) {
++          historyEntries.push(data);
++          return { id: `history-${historyEntries.length}`, ...data };
++        },
++      },
++      serviceNumberSlot: {
++        async update({
++          where,
++          data,
++        }: {
++          where: { orderId: string };
++          data: { reusableAt: Date };
++        }) {
++          reuseScheduledCalls.push({ orderId: where.orderId, reusableAt: data.reusableAt });
++          return { id: "slot-1", number: 5, orderId: where.orderId, reusableAt: data.reusableAt };
++        },
++      },
++    };
++  }
++
++  const prisma = {
++    async $transaction<T>(callback: (tx: ReturnType<typeof makeTx>) => Promise<T>): Promise<T> {
++      const locksHeld: Array<() => void> = [];
++      try {
++        const tx = makeTx(locksHeld);
++        return await callback(tx);
++      } finally {
++        locksHeld.forEach((release) => release());
++      }
++    },
++  };
++
++  function seedOrder(row: FakeOrderRow) {
++    orders.set(row.id, row);
++  }
++
++  function seedItem(row: FakeItemRow) {
++    items.set(row.id, row);
++  }
++
++  return { prisma, orders, items, historyEntries, reuseScheduledCalls, seedOrder, seedItem };
++}
++
++const fakeDbHolder: { current: ReturnType<typeof createSharedFakeDb> | null } = { current: null };
++
++function currentDb(): ReturnType<typeof createSharedFakeDb> {
++  if (!fakeDbHolder.current) {
++    throw new Error("fake db não inicializado — chame resetFakeDb() antes do teste");
++  }
++  return fakeDbHolder.current;
++}
++
++vi.mock("../../../lib/prisma.js", () => ({
++  prisma: {
++    $transaction: (callback: (tx: unknown) => Promise<unknown>) =>
++      currentDb().prisma.$transaction(callback),
++  },
++}));
++
++function resetFakeDb() {
++  const db = createSharedFakeDb();
++  fakeDbHolder.current = db;
++  return db;
++}
++
++function seedInitialState(db: ReturnType<typeof createSharedFakeDb>) {
++  db.seedOrder({
++    id: "order-1",
++    paymentStatus: "PENDENTE",
++    paidAt: null,
++    paidByUserId: null,
++    cancelledAt: null,
++    consumptionType: "LOCAL",
++    deliveredAt: null,
++  });
++  db.seedItem({
++    id: "item-1",
++    orderId: "order-1",
++    totalCents: 1000,
++    status: "PENDENTE",
++    requiresProductionSnapshot: false,
++    deliveredAt: null,
++  });
++}
++
++function assertConsistentFinalState(db: ReturnType<typeof createSharedFakeDb>) {
++  const finalOrder = db.orders.get("order-1");
++  expect(finalOrder?.paymentStatus).toBe("PAGO");
++  expect(finalOrder?.paidAt).not.toBeNull();
++  expect(finalOrder?.deliveredAt).not.toBeNull();
++  expect(db.items.get("item-1")?.deliveredAt).not.toBeNull();
++
++  const byAction = (action: string) => db.historyEntries.filter((entry) => entry.action === action);
++  expect(byAction("PAYMENT_CONFIRMED")).toHaveLength(1);
++  expect(byAction("ITEM_DELIVERED")).toHaveLength(1);
++  expect(byAction("ORDER_DELIVERED")).toHaveLength(1);
++
++  expect(db.reuseScheduledCalls).toHaveLength(1);
++  expect(db.reuseScheduledCalls[0].orderId).toBe("order-1");
++}
++
++describe("corrida entre confirmPayment (cashier) e deliverItem (delivery) no mesmo pedido", () => {
++  it("ordem lógica A: entrega acontece primeiro, pagamento depois — confirmPayment fecha o pedido", async () => {
++    const db = resetFakeDb();
++    seedInitialState(db);
++
++    const { deliverItem } = await import("../../delivery/delivery.service.js");
++    const { confirmPayment } = await import("../../cashier/cashier.service.js");
++
++    await deliverItem("order-1", "item-1", "atendente-1");
++    // Item entregue, mas pagamento ainda pendente: pedido continua aberto.
++    expect(db.orders.get("order-1")?.deliveredAt).toBeNull();
++    expect(db.historyEntries.filter((entry) => entry.action === "ORDER_DELIVERED")).toHaveLength(0);
++
++    await confirmPayment("order-1", "caixa-1");
++
++    assertConsistentFinalState(db);
++  });
++
++  it("ordem lógica B: pagamento acontece primeiro, entrega depois — deliverItem fecha o pedido", async () => {
++    const db = resetFakeDb();
++    seedInitialState(db);
++
++    const { deliverItem } = await import("../../delivery/delivery.service.js");
++    const { confirmPayment } = await import("../../cashier/cashier.service.js");
++
++    await confirmPayment("order-1", "caixa-1");
++    // Pagamento confirmado, mas item ainda não entregue: pedido continua aberto.
++    expect(db.orders.get("order-1")?.deliveredAt).toBeNull();
++    expect(db.historyEntries.filter((entry) => entry.action === "ORDER_DELIVERED")).toHaveLength(0);
++
++    await deliverItem("order-1", "item-1", "atendente-1");
++
++    assertConsistentFinalState(db);
++  });
++
++  it("corrida real entre as duas funções (mesma trava de linha do pedido): estado final consistente e nenhum evento duplicado, qualquer que seja a ordem real de execução", async () => {
++    const db = resetFakeDb();
++    seedInitialState(db);
++
++    const { deliverItem } = await import("../../delivery/delivery.service.js");
++    const { confirmPayment } = await import("../../cashier/cashier.service.js");
++
++    // As duas chamadas são disparadas "ao mesmo tempo": cada uma roda
++    // sincronamente até a primeira espera real (a trava da linha do
++    // pedido, dentro de $queryRaw) antes da outra sequer começar — é a
++    // fila de trava (mutex por orderId), e não uma decisão explícita deste
++    // teste, que decide quem trava primeiro e portanto quem vence.
++    const results = await Promise.allSettled([
++      deliverItem("order-1", "item-1", "atendente-1"),
++      confirmPayment("order-1", "caixa-1"),
++    ]);
++
++    // As duas operações são legítimas nesse cenário (nenhuma delas
++    // colide com a outra do ponto de vista de negócio) — as duas devem
++    // ter sucesso, só a ORDEM em que fecham o pedido é que varia.
++    expect(results.every((result) => result.status === "fulfilled")).toBe(true);
++
++    assertConsistentFinalState(db);
++  });
++});
+diff --git a/backend/src/modules/orders/__tests__/service-number.service.test.ts b/backend/src/modules/orders/__tests__/service-number.service.test.ts
+index f7d54cc..1a868d4 100644
+--- a/backend/src/modules/orders/__tests__/service-number.service.test.ts
++++ b/backend/src/modules/orders/__tests__/service-number.service.test.ts
+@@ -5,7 +5,7 @@ vi.mock("../../../lib/prisma.js", () => ({ prisma: {} }));
+ 
+ import {
+   allocateServiceNumber,
+-  scheduleServiceNumberReuse,
++  scheduleServiceNumberReuseOnClose,
+   SERVICE_NUMBER_REUSE_DELAY_MS,
+ } from "../service-number.service.js";
+ 
+@@ -20,6 +20,20 @@ function slot(overrides: Partial<SlotFixture> = {}): SlotFixture {
+   return { id: "slot-1", number: 1, orderId: "order-1", reusableAt: null, ...overrides };
+ }
+ 
++/**
++ * Condição de defesa (estabilização pré-Etapa 16): reusableAt<=now sozinho
++ * não é mais suficiente — o pedido dono do slot também precisa estar
++ * realmente encerrado (paymentStatus=PAGO, paidAt != null, deliveredAt !=
++ * null). Replicado aqui (em vez de importado) porque não é exportado por
++ * service-number.service.ts — é implementação interna, só o efeito
++ * observável (a condição aparecendo no where) é contrato.
++ */
++const OWNER_CLOSED_CONDITION = {
++  paymentStatus: "PAGO",
++  paidAt: { not: null },
++  deliveredAt: { not: null },
++};
++
+ function fakeTx(): {
+   serviceNumberSlot: {
+     findFirst: ReturnType<typeof vi.fn>;
+@@ -44,7 +58,7 @@ describe("service-number.service (mocks diretos)", () => {
+   });
+ 
+   describe("allocateServiceNumber", () => {
+-    it("reivindica o menor número liberado quando existe um disponível", async () => {
++    it("reivindica o menor número liberado quando existe um disponível, com o pedido dono realmente encerrado", async () => {
+       const tx = fakeTx();
+       const reusable = slot({ id: "slot-3", number: 3, reusableAt: new Date("2026-01-01T00:00:00.000Z") });
+       tx.serviceNumberSlot.findFirst.mockResolvedValue(reusable);
+@@ -54,11 +68,19 @@ describe("service-number.service (mocks diretos)", () => {
+ 
+       expect(result).toBe(3);
+       expect(tx.serviceNumberSlot.findFirst).toHaveBeenCalledWith({
+-        where: { reusableAt: { lte: expect.any(Date) }, id: { notIn: [] } },
++        where: {
++          reusableAt: { lte: expect.any(Date) },
++          id: { notIn: [] },
++          order: OWNER_CLOSED_CONDITION,
++        },
+         orderBy: { number: "asc" },
+       });
+       expect(tx.serviceNumberSlot.updateMany).toHaveBeenCalledWith({
+-        where: { id: "slot-3", reusableAt: { lte: expect.any(Date) } },
++        where: {
++          id: "slot-3",
++          reusableAt: { lte: expect.any(Date) },
++          order: OWNER_CLOSED_CONDITION,
++        },
+         data: { orderId: "order-novo", reusableAt: null },
+       });
+       expect(tx.serviceNumberSlot.create).not.toHaveBeenCalled();
+@@ -109,11 +131,19 @@ describe("service-number.service (mocks diretos)", () => {
+ 
+       expect(result).toBe(4);
+       expect(tx.serviceNumberSlot.findFirst).toHaveBeenNthCalledWith(1, {
+-        where: { reusableAt: { lte: expect.any(Date) }, id: { notIn: [] } },
++        where: {
++          reusableAt: { lte: expect.any(Date) },
++          id: { notIn: [] },
++          order: OWNER_CLOSED_CONDITION,
++        },
+         orderBy: { number: "asc" },
+       });
+       expect(tx.serviceNumberSlot.findFirst).toHaveBeenNthCalledWith(2, {
+-        where: { reusableAt: { lte: expect.any(Date) }, id: { notIn: ["slot-3"] } },
++        where: {
++          reusableAt: { lte: expect.any(Date) },
++          id: { notIn: ["slot-3"] },
++          order: OWNER_CLOSED_CONDITION,
++        },
+         orderBy: { number: "asc" },
+       });
+       expect(tx.serviceNumberSlot.create).not.toHaveBeenCalled();
+@@ -165,15 +195,45 @@ describe("service-number.service (mocks diretos)", () => {
+     });
+   });
+ 
+-  describe("scheduleServiceNumberReuse", () => {
+-    it("agenda reusableAt para exatamente 7 horas depois de paidAt", async () => {
++  describe("scheduleServiceNumberReuseOnClose", () => {
++    it("reusableAt = paidAt + 7h quando o fechamento acontece antes de completar 7h desde o pagamento", async () => {
+       const tx = fakeTx();
+       tx.serviceNumberSlot.update.mockResolvedValue(slot());
+-      const paidAt = new Date("2026-01-01T12:00:00.000Z");
+-
+-      await scheduleServiceNumberReuse(tx as unknown as Prisma.TransactionClient, "order-1", paidAt);
++      // Pagamento 10:00, fechamento (última entrega) 10:30 — completa 7h
++      // desde o pagamento é 17:00, depois do fechamento em si.
++      const paidAt = new Date("2026-01-01T10:00:00.000Z");
++      const deliveredAt = new Date("2026-01-01T10:30:00.000Z");
++
++      await scheduleServiceNumberReuseOnClose(
++        tx as unknown as Prisma.TransactionClient,
++        "order-1",
++        paidAt,
++        deliveredAt,
++      );
+ 
+       expect(SERVICE_NUMBER_REUSE_DELAY_MS).toBe(7 * 60 * 60 * 1000);
++      expect(tx.serviceNumberSlot.update).toHaveBeenCalledWith({
++        where: { orderId: "order-1" },
++        data: { reusableAt: new Date("2026-01-01T17:00:00.000Z") },
++      });
++    });
++
++    it("reusableAt = deliveredAt quando o fechamento acontece depois de completar 7h desde o pagamento", async () => {
++      const tx = fakeTx();
++      tx.serviceNumberSlot.update.mockResolvedValue(slot());
++      // Pagamento 10:00, fechamento (última entrega) 19:00 — 7h depois do
++      // pagamento seria 17:00, antes do fechamento real: o número só libera
++      // no instante em que o pedido realmente fecha, nunca antes.
++      const paidAt = new Date("2026-01-01T10:00:00.000Z");
++      const deliveredAt = new Date("2026-01-01T19:00:00.000Z");
++
++      await scheduleServiceNumberReuseOnClose(
++        tx as unknown as Prisma.TransactionClient,
++        "order-1",
++        paidAt,
++        deliveredAt,
++      );
++
+       expect(tx.serviceNumberSlot.update).toHaveBeenCalledWith({
+         where: { orderId: "order-1" },
+         data: { reusableAt: new Date("2026-01-01T19:00:00.000Z") },
+@@ -190,6 +250,13 @@ describe("service-number.service (mocks diretos)", () => {
+ // vem de nenhum lock em memória: vem só da constraint @unique em number,
+ // reproduzida aqui pelo create() rejeitando um número duplicado — o mesmo
+ // mecanismo que o Postgres aplicaria numa corrida real.
++//
++// A partir da estabilização pré-Etapa 16, o fake também modela a condição
++// de dono realmente encerrado (where.order): um Map de pedidos "donos" dos
++// slots, filtrado do mesmo jeito que o Prisma real filtraria a relação —
++// candidato só é elegível se reusableAt<=now E o pedido dono atual (pelo
++// orderId do próprio slot) estiver paymentStatus=PAGO, paidAt!=null,
++// deliveredAt!=null.
+ // -----------------------------------------------------------------------
+ describe("service-number.service (concorrência simulada)", () => {
+   interface FakeRow {
+@@ -199,14 +266,29 @@ describe("service-number.service (concorrência simulada)", () => {
+     reusableAt: Date | null;
+   }
+ 
++  interface FakeOwnerOrder {
++    paymentStatus: "PENDENTE" | "PAGO";
++    paidAt: Date | null;
++    deliveredAt: Date | null;
++  }
++
+   function createFakeServiceNumberTx() {
+     const rows: FakeRow[] = [];
++    const owners = new Map<string, FakeOwnerOrder>();
+     let nextId = 1;
+ 
++    function ownerSatisfiesClosedCondition(orderId: string): boolean {
++      const owner = owners.get(orderId);
++      return owner !== undefined
++        && owner.paymentStatus === "PAGO"
++        && owner.paidAt !== null
++        && owner.deliveredAt !== null;
++    }
++
+     return {
+       serviceNumberSlot: {
+         async findFirst(args: {
+-          where?: { reusableAt?: { lte: Date } };
++          where?: { reusableAt?: { lte: Date }; order?: unknown };
+           orderBy?: { number: "asc" | "desc" };
+         }) {
+           await Promise.resolve();
+@@ -215,21 +297,25 @@ describe("service-number.service (concorrência simulada)", () => {
+           if (cutoff) {
+             candidates = candidates.filter((row) => row.reusableAt !== null && row.reusableAt <= cutoff);
+           }
++          if (args.where?.order) {
++            candidates = candidates.filter((row) => ownerSatisfiesClosedCondition(row.orderId));
++          }
+           const sorted = [...candidates].sort((a, b) =>
+             args.orderBy?.number === "desc" ? b.number - a.number : a.number - b.number,
+           );
+           return sorted[0] ?? null;
+         },
+         async updateMany(args: {
+-          where: { id: string; reusableAt?: { lte: Date } };
++          where: { id: string; reusableAt?: { lte: Date }; order?: unknown };
+           data: { orderId: string; reusableAt: Date | null };
+         }) {
+           await Promise.resolve();
+           const row = rows.find((candidate) => candidate.id === args.where.id);
+           if (!row) return { count: 0 };
+           const cutoff = args.where.reusableAt?.lte;
+-          const stillEligible = cutoff ? row.reusableAt !== null && row.reusableAt <= cutoff : true;
+-          if (!stillEligible) return { count: 0 };
++          const stillEligibleByTime = cutoff ? row.reusableAt !== null && row.reusableAt <= cutoff : true;
++          const stillEligibleByOwner = args.where.order ? ownerSatisfiesClosedCondition(row.orderId) : true;
++          if (!stillEligibleByTime || !stillEligibleByOwner) return { count: 0 };
+           row.orderId = args.data.orderId;
+           row.reusableAt = args.data.reusableAt;
+           return { count: 1 };
+@@ -247,11 +333,15 @@ describe("service-number.service (concorrência simulada)", () => {
+           return row;
+         },
+       },
++      seedOwner(orderId: string, owner: FakeOwnerOrder) {
++        owners.set(orderId, owner);
++      },
+     };
+   }
+ 
+   it("duas criações concorrentes sem nenhum slot existente nunca recebem o mesmo número novo", async () => {
+-    const tx = createFakeServiceNumberTx() as unknown as Prisma.TransactionClient;
++    const fakeDb = createFakeServiceNumberTx();
++    const tx = fakeDb as unknown as Prisma.TransactionClient;
+ 
+     const results = await Promise.allSettled([
+       allocateServiceNumber(tx, "order-A"),
+@@ -275,19 +365,26 @@ describe("service-number.service (concorrência simulada)", () => {
+     }
+   });
+ 
+-  it("duas criações concorrentes disputando o único slot reutilizável: só uma o reivindica, a outra recebe um número novo", async () => {
+-    const tx = createFakeServiceNumberTx();
+-    // Pré-semeia um único slot já liberado (pago há mais de 7h).
+-    await tx.serviceNumberSlot.create({
++  it("duas criações concorrentes disputando o único slot reutilizável (dono realmente encerrado): só uma o reivindica, a outra recebe um número novo", async () => {
++    const fakeDb = createFakeServiceNumberTx();
++    // Pré-semeia um único slot já liberado (pago há mais de 7h) cujo dono
++    // está realmente encerrado — as duas condições que passam a ser
++    // exigidas a partir desta estabilização.
++    await fakeDb.serviceNumberSlot.create({
+       data: { number: 5, orderId: "order-antigo", reusableAt: null },
+     });
+-    const seeded = await tx.serviceNumberSlot.updateMany({
++    fakeDb.seedOwner("order-antigo", {
++      paymentStatus: "PAGO",
++      paidAt: new Date("2019-12-31T17:00:00.000Z"),
++      deliveredAt: new Date("2019-12-31T17:30:00.000Z"),
++    });
++    const seeded = await fakeDb.serviceNumberSlot.updateMany({
+       where: { id: "slot-1" },
+       data: { orderId: "order-antigo", reusableAt: new Date("2020-01-01T00:00:00.000Z") },
+     });
+     expect(seeded.count).toBe(1);
+ 
+-    const typedTx = tx as unknown as Prisma.TransactionClient;
++    const typedTx = fakeDb as unknown as Prisma.TransactionClient;
+     const [numberA, numberB] = await Promise.all([
+       allocateServiceNumber(typedTx, "order-A"),
+       allocateServiceNumber(typedTx, "order-B"),
+@@ -301,4 +398,33 @@ describe("service-number.service (concorrência simulada)", () => {
+     expect(numbers[1]).not.toBe(5);
+     expect(numberA).not.toBe(numberB);
+   });
++
++  it("slot com reusableAt expirado, mas pedido proprietário sem fechamento válido (legado), não pode ser reivindicado — cria número novo", async () => {
++    const fakeDb = createFakeServiceNumberTx();
++    // Slot com reusableAt no passado (comportamento anterior: agendado só
++    // pelo pagamento), mas o pedido dono nunca foi realmente encerrado —
++    // ainda paymentStatus=PENDENTE (ou, em outro cenário legado possível,
++    // PAGO mas deliveredAt=null). Nenhuma das duas variantes pode ser
++    // reivindicada.
++    await fakeDb.serviceNumberSlot.create({
++      data: { number: 5, orderId: "order-legado", reusableAt: null },
++    });
++    await fakeDb.serviceNumberSlot.updateMany({
++      where: { id: "slot-1" },
++      data: { orderId: "order-legado", reusableAt: new Date("2020-01-01T00:00:00.000Z") },
++    });
++    fakeDb.seedOwner("order-legado", {
++      paymentStatus: "PENDENTE",
++      paidAt: null,
++      deliveredAt: new Date("2019-12-31T12:00:00.000Z"),
++    });
++
++    const typedTx = fakeDb as unknown as Prisma.TransactionClient;
++    const result = await allocateServiceNumber(typedTx, "order-novo");
++
++    // Não reaproveitou o 5 (dono não estava realmente encerrado): recebeu
++    // um número novo em vez disso.
++    expect(result).not.toBe(5);
++    expect(result).toBe(6);
++  });
+ });
+diff --git a/backend/src/modules/orders/order.controller.ts b/backend/src/modules/orders/order.controller.ts
+index 2189a31..2c53757 100644
+--- a/backend/src/modules/orders/order.controller.ts
++++ b/backend/src/modules/orders/order.controller.ts
+@@ -14,3 +14,9 @@ export async function getOrderHandler(req: Request, res: Response) {
+   const order = await orderService.getOrderById(req.params.orderId);
+   res.json(order);
+ }
++
++export async function listOpenOrdersHandler(req: Request, res: Response) {
++  const search = typeof req.query.search === "string" ? req.query.search : undefined;
++  const orders = await orderService.listOpenOrders(search);
++  res.json(orders);
++}
+diff --git a/backend/src/modules/orders/order.routes.ts b/backend/src/modules/orders/order.routes.ts
+index 1f3b364..fbbc916 100644
+--- a/backend/src/modules/orders/order.routes.ts
++++ b/backend/src/modules/orders/order.routes.ts
+@@ -2,7 +2,7 @@ import { Router } from "express";
+ import { asyncHandler } from "../../lib/async-handler.js";
+ import { authenticate } from "../../middlewares/authenticate.js";
+ import { authorize } from "../../middlewares/authorize.js";
+-import { createOrderHandler, getOrderHandler } from "./order.controller.js";
++import { createOrderHandler, getOrderHandler, listOpenOrdersHandler } from "./order.controller.js";
+ import { getCatalogHandler } from "./catalog.controller.js";
+ import { addOrderItemHandler } from "./order-item.controller.js";
+ 
+@@ -15,9 +15,14 @@ ordersRouter.use(authenticate, authorize("ATENDENTE", "ADMIN"));
+ 
+ ordersRouter.post("/", asyncHandler(createOrderHandler));
+ 
+-// Rota estática: precisa vir ANTES de "/:orderId" para "catalog" não ser
+-// interpretado como um orderId.
++// Rotas estáticas: precisam vir ANTES de "/:orderId" para "catalog"/"open"
++// não serem interpretados como um orderId.
+ ordersRouter.get("/catalog", asyncHandler(getCatalogHandler));
+ 
++// Pedidos em aberto (estabilização pré-Etapa 16): paymentStatus=PENDENTE,
++// não cancelados, não entregues — mesma autorização ATENDENTE/ADMIN já
++// aplicada acima para todo o módulo, sem nenhuma regra de acesso nova.
++ordersRouter.get("/open", asyncHandler(listOpenOrdersHandler));
++
+ ordersRouter.get("/:orderId", asyncHandler(getOrderHandler));
+ ordersRouter.post("/:orderId/items", asyncHandler(addOrderItemHandler));
+diff --git a/backend/src/modules/orders/order.service.ts b/backend/src/modules/orders/order.service.ts
+index 4ed46cb..2980e94 100644
+--- a/backend/src/modules/orders/order.service.ts
++++ b/backend/src/modules/orders/order.service.ts
+@@ -9,6 +9,33 @@ export type OrderWithItems = Order & {
+   items: (OrderItem & { additionals: OrderItemAdditional[] })[];
+ };
+ 
++export type OrderDetail = OrderWithItems & { totalCents: number };
++
++export interface OpenOrderSummary {
++  id: string;
++  serviceNumber: number;
++  customerName: string;
++  channel: Order["channel"];
++  consumptionType: Order["consumptionType"];
++  createdAt: Date;
++  pickupTime: Date | null;
++  totalCents: number;
++}
++
++type OpenOrderRow = Pick<
++  Order,
++  "id" | "serviceNumber" | "customerName" | "channel" | "consumptionType" | "createdAt" | "pickupTime"
++> & {
++  items: Pick<OrderItem, "status" | "totalCents">[];
++};
++
++/** Soma só os itens não cancelados — item cancelado nunca entra no total (mesmo padrão de Caixa/Histórico). */
++function billableTotalCents(items: Pick<OrderItem, "status" | "totalCents">[]): number {
++  return items
++    .filter((item) => item.status !== "CANCELADO")
++    .reduce((sum, item) => sum + item.totalCents, 0);
++}
++
+ // Quantas vezes tentar a transação inteira de novo quando duas criações
+ // concorrentes colidem no mesmo número operacional novo (violação da
+ // constraint @unique em ServiceNumberSlot.number).
+@@ -111,9 +138,12 @@ export async function createOrder(
+  * por includedAt asc (ordem de inclusão), cada um com seus adicionais.
+  * Os nomes exibidos vêm dos snapshots do próprio item — não busca de novo
+  * o nome atual do produto/adicional. Não calcula nenhum status
+- * operacional: isso fica para etapas futuras.
++ * operacional além do totalCents (estabilização pré-Etapa 16): o backend
++ * é sempre a autoridade financeira, então o detalhe usado pelo Atendimento
++ * também recebe totalCents recalculado aqui a partir dos itens não
++ * CANCELADO — o frontend nunca decide esse valor, só formata.
+  */
+-export async function getOrderById(id: string): Promise<OrderWithItems> {
++export async function getOrderById(id: string): Promise<OrderDetail> {
+   const order = await prisma.order.findUnique({
+     where: { id },
+     include: {
+@@ -128,5 +158,66 @@ export async function getOrderById(id: string): Promise<OrderWithItems> {
+     throw new AppError("Pedido não encontrado.", 404, ErrorCode.ORDER_NOT_FOUND);
+   }
+ 
+-  return order;
++  return { ...order, totalCents: billableTotalCents(order.items) };
++}
++
++/**
++ * Pedidos "em aberto" no Atendimento (estabilização pré-Etapa 16): ainda
++ * aguardando pagamento, não cancelados e ainda não encerrados
++ * operacionalmente — exatamente os três campos que definem esse estado,
++ * sem nenhuma coluna nova. Qualquer ATENDENTE pode continuar qualquer
++ * pedido aberto: não existe dono/atendente responsável por um pedido neste
++ * sistema (instalação única de padaria, sem garçom/mesa/comanda).
++ *
++ * Busca opcional por nome (substring, sem diferenciar maiúsculas/
++ * minúsculas) ou número operacional exato (aceita "27"/"#27") — mesmo
++ * formato de busca usado em Caixa/Retirada/Histórico, reimplementado aqui
++ * porque cada módulo é independente.
++ *
++ * Ordenado por createdAt asc (mais antigos primeiro — quem está esperando
++ * há mais tempo aparece primeiro), com id asc como desempate determinístico.
++ * totalCents é sempre recalculado no backend, somando só os itens não
++ * CANCELADO — nunca confiado do cliente.
++ */
++export async function listOpenOrders(search?: string): Promise<OpenOrderSummary[]> {
++  const where: Prisma.OrderWhereInput = {
++    paymentStatus: "PENDENTE",
++    cancelledAt: null,
++    deliveredAt: null,
++  };
++
++  const trimmedSearch = search?.trim();
++  if (trimmedSearch) {
++    // Aceita "27" e "#27" como o mesmo número operacional — só o # inicial
++    // é removido, então "#" sozinho ou "2#7" seguem como busca por nome.
++    // Uma busca numérica nunca é tratada como substring de nome.
++    const withoutLeadingHash = trimmedSearch.startsWith("#")
++      ? trimmedSearch.slice(1)
++      : trimmedSearch;
++    const asServiceNumber = Number(withoutLeadingHash);
++    const matchesServiceNumber =
++      withoutLeadingHash !== "" && Number.isInteger(asServiceNumber) && asServiceNumber > 0;
++
++    where.OR = [
++      { customerName: { contains: trimmedSearch, mode: "insensitive" } },
++      ...(matchesServiceNumber ? [{ serviceNumber: asServiceNumber }] : []),
++    ];
++  }
++
++  const orders: OpenOrderRow[] = await prisma.order.findMany({
++    where,
++    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
++    include: { items: { select: { status: true, totalCents: true } } },
++  });
++
++  return orders.map((order) => ({
++    id: order.id,
++    serviceNumber: order.serviceNumber,
++    customerName: order.customerName,
++    channel: order.channel,
++    consumptionType: order.consumptionType,
++    createdAt: order.createdAt,
++    pickupTime: order.pickupTime,
++    totalCents: billableTotalCents(order.items),
++  }));
+ }
+diff --git a/backend/src/modules/orders/order.types.ts b/backend/src/modules/orders/order.types.ts
+index d823bf8..1317b02 100644
+--- a/backend/src/modules/orders/order.types.ts
++++ b/backend/src/modules/orders/order.types.ts
+@@ -32,16 +32,32 @@ const pickupTimeSchema = z
+  * campos de pagamento/cancelamento nunca vêm do corpo da requisição: o Zod
+  * descarta silenciosamente qualquer campo extra enviado, e createdByUserId
+  * é sempre obtido do usuário autenticado no controller.
++ *
++ * Defesa de pickupTime por canal (estabilização pré-Etapa 16): o frontend
++ * já limpa esse campo ao trocar para BALCAO, mas o backend não confia
++ * nisso — BALCAO com pickupTime não nulo é rejeitado explicitamente em vez
++ * de aceito em silêncio (usa o campo existente, sem coluna nova).
++ * WHATSAPP aceita pickupTime nulo ou preenchido, sem exigência.
+  */
+-export const createOrderSchema = z.object({
+-  customerName: z.string().trim().min(1, "Nome do cliente é obrigatório."),
+-  channel: z.enum(["BALCAO", "WHATSAPP"], {
+-    errorMap: () => ({ message: "Canal deve ser BALCAO ou WHATSAPP." }),
+-  }),
+-  consumptionType: z.enum(["LOCAL", "VIAGEM"], {
+-    errorMap: () => ({ message: "Tipo de consumo deve ser LOCAL ou VIAGEM." }),
+-  }),
+-  pickupTime: pickupTimeSchema,
+-});
++export const createOrderSchema = z
++  .object({
++    customerName: z.string().trim().min(1, "Nome do cliente é obrigatório."),
++    channel: z.enum(["BALCAO", "WHATSAPP"], {
++      errorMap: () => ({ message: "Canal deve ser BALCAO ou WHATSAPP." }),
++    }),
++    consumptionType: z.enum(["LOCAL", "VIAGEM"], {
++      errorMap: () => ({ message: "Tipo de consumo deve ser LOCAL ou VIAGEM." }),
++    }),
++    pickupTime: pickupTimeSchema,
++  })
++  .superRefine((data, ctx) => {
++    if (data.channel === "BALCAO" && data.pickupTime !== null) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        message: "Pedido BALCAO não aceita horário de retirada.",
++        path: ["pickupTime"],
++      });
++    }
++  });
+ 
+ export type CreateOrderInput = z.infer<typeof createOrderSchema>;
+diff --git a/backend/src/modules/orders/service-number.service.ts b/backend/src/modules/orders/service-number.service.ts
+index cbc9b87..ef64651 100644
+--- a/backend/src/modules/orders/service-number.service.ts
++++ b/backend/src/modules/orders/service-number.service.ts
+@@ -9,17 +9,38 @@ export const SERVICE_NUMBER_REUSE_DELAY_MS = 7 * 60 * 60 * 1000;
+ type TransactionClient = Prisma.TransactionClient;
+ 
+ /**
+- * Tenta reivindicar o menor número já liberado (reusableAt no passado).
+- * O updateMany repete a condição reusableAt<=now do próprio findFirst: se
+- * outra transação concorrente já tiver reivindicado esse slot entre as
+- * duas consultas, count vem 0 — nesse caso não desistimos direto para um
+- * número novo, tentamos o próximo menor slot ainda elegível (excluindo os
+- * que já perdemos a corrida). Não há limite de tentativas: o conjunto de
+- * candidatos ainda não tentados só diminui a cada volta (cada perda entra
+- * em lostSlotIds e nunca mais é considerada), então o loop sempre termina
+- * — no máximo depois de esgotar todos os slots reutilizáveis que existiam
+- * no banco no início da chamada — e só desiste de reaproveitar quando uma
+- * consulta nova confirma que não sobrou nenhum candidato elegível.
++ * Condição de defesa (estabilização pré-Etapa 16): reusableAt<=now sozinho
++ * não é mais suficiente para reivindicar um slot. O comportamento anterior
++ * agendava a liberação no momento do PAGAMENTO, então um slot pode ter
++ * reusableAt no passado mesmo que o pedido dono nunca tenha sido realmente
++ * encerrado (ex: LOCAL pago, mas ainda com item não entregue). Um slot só
++ * pode ser reivindicado quando o pedido dono ATUAL estiver com
++ * paymentStatus=PAGO, paidAt != null e deliveredAt != null — as mesmas três
++ * condições que definem "pedido realmente encerrado" (ver
++ * scheduleServiceNumberReuseOnClose abaixo). Isso é reforçado tanto no
++ * findFirst quanto no updateMany, pelo mesmo motivo que reusableAt já era
++ * reconferido nos dois: a condição pode deixar de valer entre as duas
++ * consultas sob concorrência real.
++ */
++const OWNER_CLOSED_CONDITION = {
++  paymentStatus: "PAGO" as const,
++  paidAt: { not: null },
++  deliveredAt: { not: null },
++};
++
++/**
++ * Tenta reivindicar o menor número já liberado (reusableAt no passado E
++ * pedido dono realmente encerrado). O updateMany repete as mesmas condições
++ * do próprio findFirst: se outra transação concorrente já tiver
++ * reivindicado esse slot entre as duas consultas, count vem 0 — nesse caso
++ * não desistimos direto para um número novo, tentamos o próximo menor slot
++ * ainda elegível (excluindo os que já perdemos a corrida). Não há limite de
++ * tentativas: o conjunto de candidatos ainda não tentados só diminui a cada
++ * volta (cada perda entra em lostSlotIds e nunca mais é considerada), então
++ * o loop sempre termina — no máximo depois de esgotar todos os slots
++ * reutilizáveis que existiam no banco no início da chamada — e só desiste
++ * de reaproveitar quando uma consulta nova confirma que não sobrou nenhum
++ * candidato elegível.
+  */
+ async function claimReusableSlot(tx: TransactionClient, orderId: string): Promise<number | null> {
+   const now = new Date();
+@@ -27,7 +48,11 @@ async function claimReusableSlot(tx: TransactionClient, orderId: string): Promis
+ 
+   for (;;) {
+     const candidate = await tx.serviceNumberSlot.findFirst({
+-      where: { reusableAt: { lte: now }, id: { notIn: [...lostSlotIds] } },
++      where: {
++        reusableAt: { lte: now },
++        id: { notIn: [...lostSlotIds] },
++        order: OWNER_CLOSED_CONDITION,
++      },
+       orderBy: { number: "asc" },
+     });
+ 
+@@ -36,7 +61,11 @@ async function claimReusableSlot(tx: TransactionClient, orderId: string): Promis
+     }
+ 
+     const claim = await tx.serviceNumberSlot.updateMany({
+-      where: { id: candidate.id, reusableAt: { lte: now } },
++      where: {
++        id: candidate.id,
++        reusableAt: { lte: now },
++        order: OWNER_CLOSED_CONDITION,
++      },
+       data: { orderId, reusableAt: null },
+     });
+ 
+@@ -85,15 +114,26 @@ export async function allocateServiceNumber(
+ }
+ 
+ /**
+- * Agenda a liberação do número operacional do pedido pago: só fica
+- * elegível para reuso 7 horas depois de paidAt.
++ * Agenda a liberação do número operacional de um pedido REALMENTE encerrado
++ * (estabilização pré-Etapa 16): quem chama isso já confirmou, na mesma
++ * transação, que o pedido está com paymentStatus=PAGO e todo item válido
++ * entregue — nunca deve ser chamada só porque o pagamento foi confirmado,
++ * nem só porque o último item foi entregue, isoladamente.
++ *
++ * reusableAt = max(paidAt + 7h, deliveredAt): cobre tanto o caso comum
++ * (entregue rápido, pagamento demora) quanto o caso onde a entrega demora
++ * mais que 7h depois do pagamento — nesse caso o número só libera no
++ * instante do fechamento real, nunca antes dele.
+  */
+-export async function scheduleServiceNumberReuse(
++export async function scheduleServiceNumberReuseOnClose(
+   tx: TransactionClient,
+   orderId: string,
+   paidAt: Date,
++  deliveredAt: Date,
+ ): Promise<void> {
+-  const reusableAt = new Date(paidAt.getTime() + SERVICE_NUMBER_REUSE_DELAY_MS);
++  const reusableAt = new Date(
++    Math.max(paidAt.getTime() + SERVICE_NUMBER_REUSE_DELAY_MS, deliveredAt.getTime()),
++  );
+ 
+   await tx.serviceNumberSlot.update({
+     where: { orderId },
+diff --git a/backend/src/modules/production/__tests__/production.routes.test.ts b/backend/src/modules/production/__tests__/production.routes.test.ts
+index 464d230..ffb36f6 100644
+--- a/backend/src/modules/production/__tests__/production.routes.test.ts
++++ b/backend/src/modules/production/__tests__/production.routes.test.ts
+@@ -38,7 +38,7 @@ const queueItemFixture = {
+   observation: null,
+   includedAt: new Date("2026-01-01T10:00:00.000Z"),
+   additionals: [],
+-  order: { serviceNumber: 154, customerName: "Maria" },
++  order: { serviceNumber: 154, customerName: "Maria", pickupTime: null },
+ };
+ 
+ const advancedItemFixture = {
+diff --git a/backend/src/modules/production/__tests__/production.service.test.ts b/backend/src/modules/production/__tests__/production.service.test.ts
+index 3e0ad3f..07f8295 100644
+--- a/backend/src/modules/production/__tests__/production.service.test.ts
++++ b/backend/src/modules/production/__tests__/production.service.test.ts
+@@ -115,7 +115,7 @@ function item(overrides: Partial<ItemFixture> = {}): ItemFixture {
+ type StationQueueOrderItemRow = Prisma.OrderItemGetPayload<{
+   include: {
+     additionals: true;
+-    order: { select: { serviceNumber: true; customerName: true } };
++    order: { select: { serviceNumber: true; customerName: true; pickupTime: true } };
+   };
+ }>;
+ 
+@@ -210,7 +210,7 @@ describe("production.service", () => {
+       const queueRow: StationQueueOrderItemRow = {
+         ...item({ status: "PENDENTE" }),
+         additionals: [],
+-        order: { serviceNumber: 154, customerName: "Maria" },
++        order: { serviceNumber: 154, customerName: "Maria", pickupTime: null },
+       };
+       vi.mocked(prisma.orderItem.findMany).mockResolvedValue([queueRow]);
+ 
+@@ -228,7 +228,7 @@ describe("production.service", () => {
+           observation: null,
+           includedAt: new Date("2026-01-01T10:00:00.000Z"),
+           additionals: [],
+-          order: { serviceNumber: 154, customerName: "Maria" },
++          order: { serviceNumber: 154, customerName: "Maria", pickupTime: null },
+         },
+       ]);
+       expect(result[0]).not.toHaveProperty("basePriceCentsSnapshot");
+@@ -280,11 +280,39 @@ describe("production.service", () => {
+         orderBy: { includedAt: "asc" },
+         include: {
+           additionals: true,
+-          order: { select: { serviceNumber: true, customerName: true } },
++          order: { select: { serviceNumber: true, customerName: true, pickupTime: true } },
+         },
+       });
+     });
+ 
++    // Estabilização pré-Etapa 16, item 14: pickupTime é só informação
++    // visual — aparece no contrato, mas não entra em where/orderBy.
++    it("expõe pickupTime do pedido quando presente, sem influenciar a ordenação (continua includedAt asc)", async () => {
++      vi.mocked(prisma.station.findUnique).mockResolvedValue(station());
++      const pickupTime = new Date("2026-02-01T18:00:00.000Z");
++      const early: StationQueueOrderItemRow = {
++        ...item({ id: "item-1", includedAt: new Date("2026-01-01T09:00:00.000Z") }),
++        additionals: [],
++        order: { serviceNumber: 154, customerName: "Maria", pickupTime },
++      };
++      const late: StationQueueOrderItemRow = {
++        ...item({ id: "item-2", includedAt: new Date("2026-01-01T10:00:00.000Z") }),
++        additionals: [],
++        order: { serviceNumber: 155, customerName: "João", pickupTime: null },
++      };
++      // O banco real já devolveria em ordem por includedAt asc (orderBy da
++      // query) — o mock aqui já reflete essa ordem, o teste confirma que o
++      // resultado mapeado preserva essa mesma ordem sem reordenar por
++      // pickupTime.
++      vi.mocked(prisma.orderItem.findMany).mockResolvedValue([early, late]);
++
++      const result = await getStationQueue("station-1");
++
++      expect(result.map((queueItem) => queueItem.id)).toEqual(["item-1", "item-2"]);
++      expect(result[0].order.pickupTime).toEqual(pickupTime);
++      expect(result[1].order.pickupTime).toBeNull();
++    });
++
+     it("ordena por includedAt asc", async () => {
+       vi.mocked(prisma.station.findUnique).mockResolvedValue(station());
+       vi.mocked(prisma.orderItem.findMany).mockResolvedValue([]);
+diff --git a/backend/src/modules/production/production.service.ts b/backend/src/modules/production/production.service.ts
+index 2ba9179..eed600b 100644
+--- a/backend/src/modules/production/production.service.ts
++++ b/backend/src/modules/production/production.service.ts
+@@ -75,7 +75,7 @@ export interface ProductionQueueItem {
+   observation: string | null;
+   includedAt: Date;
+   additionals: Pick<OrderItemAdditional, "id" | "nameSnapshot" | "quantity">[];
+-  order: { serviceNumber: number; customerName: string };
++  order: { serviceNumber: number; customerName: string; pickupTime: Date | null };
+ }
+ 
+ /**
+@@ -94,9 +94,13 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
+ 
+   type QueueItemRow = OrderItem & {
+     additionals: OrderItemAdditional[];
+-    order: { serviceNumber: number; customerName: string };
++    order: { serviceNumber: number; customerName: string; pickupTime: Date | null };
+   };
+ 
++  // pickupTime aqui é SOMENTE informação visual (estabilização pré-Etapa
++  // 16): não entra em nenhum critério de where/orderBy — a fila continua
++  // ordenada por includedAt asc, sem priorização, alerta ou som por
++  // horário de retirada.
+   const items: QueueItemRow[] = await prisma.orderItem.findMany({
+     where: {
+       stationIdSnapshot: stationId,
+@@ -107,7 +111,7 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
+     orderBy: { includedAt: "asc" },
+     include: {
+       additionals: true,
+-      order: { select: { serviceNumber: true, customerName: true } },
++      order: { select: { serviceNumber: true, customerName: true, pickupTime: true } },
+     },
+   });
+ 
+diff --git a/frontend/src/App.tsx b/frontend/src/App.tsx
+index 3690554..f6cafea 100644
+--- a/frontend/src/App.tsx
++++ b/frontend/src/App.tsx
+@@ -8,6 +8,7 @@ import ProductsPage from "./features/products/ProductsPage.js";
+ import ProductVariationsPage from "./features/product-variations/ProductVariationsPage.js";
+ import AdditionalsPage from "./features/additionals/AdditionalsPage.js";
+ import NewOrderPage from "./features/orders/NewOrderPage.js";
++import OpenOrdersPage from "./features/orders/OpenOrdersPage.js";
+ import OrderPage from "./features/orders/OrderPage.js";
+ import AddItemPage from "./features/orders/AddItemPage.js";
+ import ProductionStationsPage from "./features/production/ProductionStationsPage.js";
+@@ -71,6 +72,14 @@ export default function App() {
+               </ProtectedRoute>
+             }
+           />
++          <Route
++            path="/orders/open"
++            element={
++              <ProtectedRoute allowedRoles={["ATENDENTE", "ADMIN"]}>
++                <OpenOrdersPage />
++              </ProtectedRoute>
++            }
++          />
+           <Route
+             path="/orders/:orderId/items/new"
+             element={
+diff --git a/frontend/src/features/orders/OpenOrdersPage.tsx b/frontend/src/features/orders/OpenOrdersPage.tsx
+new file mode 100644
+index 0000000..ee08617
+--- /dev/null
++++ b/frontend/src/features/orders/OpenOrdersPage.tsx
+@@ -0,0 +1,173 @@
++import { useCallback, useEffect, useState, type FormEvent } from "react";
++import { Link } from "react-router-dom";
++import { useAuth } from "../auth/AuthContext.js";
++import { ApiError } from "../../services/apiClient.js";
++import { getOpenOrders } from "./ordersService.js";
++import type { ConsumptionType, OpenOrder, OrderChannel } from "./types.js";
++
++const CHANNEL_LABEL: Record<OrderChannel, string> = {
++  BALCAO: "Balcão",
++  WHATSAPP: "WhatsApp",
++};
++
++const CONSUMPTION_LABEL: Record<ConsumptionType, string> = {
++  LOCAL: "Local",
++  VIAGEM: "Viagem",
++};
++
++function errorMessage(err: unknown): string {
++  return err instanceof ApiError ? err.message : "Não foi possível conectar ao servidor.";
++}
++
++function formatBRL(cents: number): string {
++  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(
++    cents / 100,
++  );
++}
++
++function formatDateTime(iso: string): string {
++  return new Date(iso).toLocaleString("pt-BR", {
++    day: "2-digit",
++    month: "2-digit",
++    hour: "2-digit",
++    minute: "2-digit",
++  });
++}
++
++function formatTime(iso: string): string {
++  return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
++}
++
++/**
++ * Pedidos em aberto no Atendimento (estabilização pré-Etapa 16). Qualquer
++ * ATENDENTE pode continuar qualquer pedido aberto — não existe dono/
++ * atendente responsável por um pedido neste sistema. A navegação para o
++ * detalhe usa sempre o UUID real do pedido (order.id), nunca o
++ * serviceNumber — o número operacional é reutilizável e não identifica um
++ * pedido de forma unívoca.
++ */
++export default function OpenOrdersPage() {
++  const { token } = useAuth();
++
++  const [searchInput, setSearchInput] = useState("");
++  const [search, setSearch] = useState("");
++  const [orders, setOrders] = useState<OpenOrder[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [error, setError] = useState<string | null>(null);
++
++  const load = useCallback(async () => {
++    if (!token) return;
++    setLoading(true);
++    setError(null);
++    try {
++      setOrders(await getOpenOrders(token, search));
++    } catch (err) {
++      setError(errorMessage(err));
++    } finally {
++      setLoading(false);
++    }
++  }, [token, search]);
++
++  useEffect(() => {
++    load();
++  }, [load]);
++
++  function handleSearchSubmit(event: FormEvent) {
++    event.preventDefault();
++    setSearch(searchInput.trim());
++  }
++
++  function clearSearch() {
++    setSearchInput("");
++    setSearch("");
++  }
++
++  return (
++    <div className="min-h-screen bg-neutral-950 text-neutral-100 px-4 py-10">
++      <div className="max-w-2xl mx-auto space-y-6">
++        <div className="flex items-center justify-between">
++          <h1 className="text-2xl font-semibold">Pedidos em aberto</h1>
++          <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
++            Voltar
++          </Link>
++        </div>
++
++        <form onSubmit={handleSearchSubmit} className="flex gap-3">
++          <input
++            type="text"
++            value={searchInput}
++            onChange={(event) => setSearchInput(event.target.value)}
++            placeholder="Buscar por número do pedido (ex: 27 ou #27) ou nome do cliente..."
++            className="flex-1 rounded-xl bg-neutral-900 border border-neutral-700 px-4 py-3 text-neutral-100 outline-none focus:ring-2 focus:ring-emerald-500"
++          />
++          <button
++            type="submit"
++            className="rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-100 font-medium px-5 py-3 transition-colors"
++          >
++            Buscar
++          </button>
++          {search !== "" && (
++            <button
++              type="button"
++              onClick={clearSearch}
++              className="text-sm text-neutral-400 hover:text-neutral-200"
++            >
++              Limpar
++            </button>
++          )}
++        </form>
++
++        {error && (
++          <p
++            role="alert"
++            className="text-sm text-red-400 bg-red-950/40 border border-red-900 rounded-lg px-3 py-2"
++          >
++            {error}
++          </p>
++        )}
++
++        {loading && <p className="text-neutral-400">Carregando...</p>}
++
++        {!loading && !error && orders.length === 0 && (
++          <p className="text-neutral-400 bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
++            Nenhum pedido em aberto no momento.
++          </p>
++        )}
++
++        {!loading && orders.length > 0 && (
++          <div className="bg-neutral-900 border border-neutral-800 rounded-xl divide-y divide-neutral-800">
++            {orders.map((order) => (
++              <Link
++                key={order.id}
++                to={`/orders/${order.id}`}
++                className="flex items-center justify-between gap-4 px-4 py-4 hover:bg-neutral-800/60 transition-colors"
++              >
++                <div>
++                  <p className="text-neutral-100 font-semibold">
++                    Pedido #{order.serviceNumber} — {order.customerName}
++                  </p>
++                  <p className="text-sm text-neutral-500">
++                    {CHANNEL_LABEL[order.channel]} • {CONSUMPTION_LABEL[order.consumptionType]} •{" "}
++                    aberto desde {formatDateTime(order.createdAt)}
++                    {order.pickupTime && <> • retirada às {formatTime(order.pickupTime)}</>}
++                  </p>
++                </div>
++                <span className="text-neutral-200 font-medium whitespace-nowrap">
++                  {formatBRL(order.totalCents)}
++                </span>
++              </Link>
++            ))}
++          </div>
++        )}
++
++        <button
++          type="button"
++          onClick={load}
++          className="text-sm text-neutral-400 hover:text-neutral-200"
++        >
++          Atualizar
++        </button>
++      </div>
++    </div>
++  );
++}
+diff --git a/frontend/src/features/orders/OrderPage.tsx b/frontend/src/features/orders/OrderPage.tsx
+index ccab086..fe36b2c 100644
+--- a/frontend/src/features/orders/OrderPage.tsx
++++ b/frontend/src/features/orders/OrderPage.tsx
+@@ -121,12 +121,16 @@ export default function OrderPage() {
+               <p className="text-sm text-neutral-500">
+                 {CHANNEL_LABEL[order.channel]} • {CONSUMPTION_LABEL[order.consumptionType]}
+               </p>
+-              {order.paymentStatus === "PENDENTE" ? (
++              {order.deliveredAt !== null ? (
++                <p className="text-sm text-neutral-400 mt-1">Pedido encerrado • PAGO e entregue</p>
++              ) : order.paymentStatus === "PENDENTE" ? (
+                 <p className="text-sm text-emerald-400 mt-1">
+                   Conta aberta desde {formatTime(order.createdAt)}
+                 </p>
+               ) : (
+-                <p className="text-sm text-neutral-400 mt-1">Conta fechada • PAGO</p>
++                <p className="text-sm text-neutral-400 mt-1">
++                  Conta fechada • PAGO — aguardando entrega dos itens
++                </p>
+               )}
+             </div>
+ 
+@@ -135,21 +139,40 @@ export default function OrderPage() {
+                 Nenhum item adicionado ainda.
+               </p>
+             ) : (
+-              <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 divide-y divide-neutral-800">
+-                {order.items.map((item) => (
+-                  <ItemRow key={item.id} item={item} />
+-                ))}
+-              </div>
++              <>
++                <div className="bg-neutral-900 border border-neutral-800 rounded-xl px-4 divide-y divide-neutral-800">
++                  {order.items.map((item) => (
++                    <ItemRow key={item.id} item={item} />
++                  ))}
++                </div>
++                <div className="flex items-baseline justify-between px-1">
++                  <span className="text-neutral-400">Total</span>
++                  <span className="text-lg font-semibold text-neutral-100">
++                    {formatBRL(order.totalCents)}
++                  </span>
++                </div>
++              </>
+             )}
+ 
+-            {order.paymentStatus === "PENDENTE" && (
+-              <Link
+-                to={`/orders/${order.id}/items/new`}
+-                className="block w-full text-center rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-4 transition-colors"
+-              >
+-                + Adicionar outro item
+-              </Link>
+-            )}
++            {/*
++              O botão só aparece quando o pedido está operacionalmente apto
++              a receber item novo (estabilização pré-Etapa 16): não basta
++              paymentStatus=PENDENTE sozinho — o backend continua sendo a
++              autoridade final (ver getOpenOrder em order-item.service.ts),
++              isso aqui só evita oferecer uma ação que o servidor rejeitaria.
++              Um LOCAL PENDENTE com todos os itens atuais já entregues
++              continua com deliveredAt=null, então continua apto.
++            */}
++            {order.paymentStatus === "PENDENTE" &&
++              order.cancelledAt === null &&
++              order.deliveredAt === null && (
++                <Link
++                  to={`/orders/${order.id}/items/new`}
++                  className="block w-full text-center rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-4 py-4 transition-colors"
++                >
++                  + Adicionar outro item
++                </Link>
++              )}
+ 
+             <div className="text-center">
+               <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
+diff --git a/frontend/src/features/orders/ordersService.ts b/frontend/src/features/orders/ordersService.ts
+index 1fbf077..1fb4a54 100644
+--- a/frontend/src/features/orders/ordersService.ts
++++ b/frontend/src/features/orders/ordersService.ts
+@@ -3,6 +3,7 @@ import type {
+   AddOrderItemInput,
+   Catalog,
+   CreateOrderInput,
++  OpenOrder,
+   Order,
+   OrderItem,
+   OrderWithItems,
+@@ -20,6 +21,11 @@ export function getOrder(token: string, orderId: string): Promise<OrderWithItems
+   return apiFetch<OrderWithItems>(`/api/orders/${orderId}`, { token });
+ }
+ 
++export function getOpenOrders(token: string, search?: string): Promise<OpenOrder[]> {
++  const query = search?.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
++  return apiFetch<OpenOrder[]>(`/api/orders/open${query}`, { token });
++}
++
+ export function getCatalog(token: string): Promise<Catalog> {
+   return apiFetch<Catalog>("/api/orders/catalog", { token });
+ }
+diff --git a/frontend/src/features/orders/types.ts b/frontend/src/features/orders/types.ts
+index 1263f81..57c6428 100644
+--- a/frontend/src/features/orders/types.ts
++++ b/frontend/src/features/orders/types.ts
+@@ -13,10 +13,28 @@ export interface Order {
+   consumptionType: ConsumptionType;
+   pickupTime: string | null;
+   paymentStatus: PaymentStatus;
++  // deliveredAt != null significa pedido integralmente encerrado (paga +
++  // todo item válido entregue) — estabilização pré-Etapa 16. Usado, junto
++  // de cancelledAt, para decidir se o pedido ainda aceita item novo.
++  deliveredAt: string | null;
++  cancelledAt: string | null;
+   createdByUserId: string;
+   createdAt: string;
+ }
+ 
++// Pedido em aberto no Atendimento (estabilização pré-Etapa 16) — resumo
++// mínimo devolvido por GET /api/orders/open, distinto de Order/OrderWithItems.
++export interface OpenOrder {
++  id: string;
++  serviceNumber: number;
++  customerName: string;
++  channel: OrderChannel;
++  consumptionType: ConsumptionType;
++  createdAt: string;
++  pickupTime: string | null;
++  totalCents: number;
++}
++
+ export interface OrderItemAdditional {
+   id: string;
+   additionalId: string;
+@@ -48,6 +66,10 @@ export interface OrderItem {
+ 
+ export interface OrderWithItems extends Order {
+   items: OrderItem[];
++  // Sempre calculado no backend a partir dos itens não CANCELADO — o
++  // frontend só formata, nunca define a verdade financeira (estabilização
++  // pré-Etapa 16).
++  totalCents: number;
+ }
+ 
+ export interface CreateOrderInput {
+diff --git a/frontend/src/features/production/ProductionItemCard.tsx b/frontend/src/features/production/ProductionItemCard.tsx
+index e64a4a1..782bb5d 100644
+--- a/frontend/src/features/production/ProductionItemCard.tsx
++++ b/frontend/src/features/production/ProductionItemCard.tsx
+@@ -42,6 +42,10 @@ function useElapsedLabel(includedAt: string): string {
+   return elapsedLabel(includedAt, nowMs);
+ }
+ 
++function formatPickupTime(pickupTime: string): string {
++  return new Date(pickupTime).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
++}
++
+ interface ProductionItemCardProps {
+   item: ProductionItem;
+   onAdvance: (item: ProductionItem) => void;
+@@ -59,6 +63,12 @@ export function ProductionItemCard({ item, onAdvance, advancing }: ProductionIte
+             Pedido #{item.order.serviceNumber}
+           </p>
+           <p className="text-neutral-400">{item.order.customerName}</p>
++          {/* Só exibição (estabilização pré-Etapa 16) — não muda a ordem da fila. */}
++          {item.order.pickupTime && (
++            <p className="text-sm text-neutral-500">
++              Retirada às {formatPickupTime(item.order.pickupTime)}
++            </p>
++          )}
+         </div>
+         <span className="text-sm text-neutral-500 whitespace-nowrap">{elapsed}</span>
+       </div>
+diff --git a/frontend/src/features/production/production.types.ts b/frontend/src/features/production/production.types.ts
+index 55beab6..8bb66bf 100644
+--- a/frontend/src/features/production/production.types.ts
++++ b/frontend/src/features/production/production.types.ts
+@@ -27,5 +27,8 @@ export interface ProductionItem {
+   order: {
+     serviceNumber: number;
+     customerName: string;
++    // Só informação visual (estabilização pré-Etapa 16) — nunca usado para
++    // ordenar, priorizar ou alertar nesta etapa.
++    pickupTime: string | null;
+   };
+ }
+diff --git a/frontend/src/pages/HomePage.tsx b/frontend/src/pages/HomePage.tsx
+index 846beaa..226f060 100644
+--- a/frontend/src/pages/HomePage.tsx
++++ b/frontend/src/pages/HomePage.tsx
+@@ -1,19 +1,8 @@
+-import { useEffect, useState } from "react";
+ import { Link } from "react-router-dom";
+ import { useAuth } from "../features/auth/AuthContext.js";
+ 
+-type HealthStatus = "checking" | "ok" | "error";
+-
+ export default function HomePage() {
+   const { user, logout } = useAuth();
+-  const [status, setStatus] = useState<HealthStatus>("checking");
+-
+-  useEffect(() => {
+-    const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:3333";
+-    fetch(`${apiUrl}/health`)
+-      .then((res) => setStatus(res.ok ? "ok" : "error"))
+-      .catch(() => setStatus("error"));
+-  }, []);
+ 
+   return (
+     <div className="min-h-screen bg-neutral-950 text-neutral-100 flex flex-col items-center justify-center gap-4">
+@@ -21,14 +10,6 @@ export default function HomePage() {
+       <p className="text-neutral-400">
+         Olá, {user?.name} — perfil: {user?.role}
+       </p>
+-      <p className="text-sm">
+-        Backend:{" "}
+-        {status === "checking" && "verificando..."}
+-        {status === "ok" && <span className="text-emerald-400">conectado ✓</span>}
+-        {status === "error" && (
+-          <span className="text-red-400">não foi possível conectar</span>
+-        )}
+-      </p>
+       {(user?.role === "ATENDENTE" || user?.role === "ADMIN") && (
+         <Link
+           to="/orders/new"
+@@ -38,6 +19,17 @@ export default function HomePage() {
+         </Link>
+       )}
+ 
++      {/* Pedidos em aberto (estabilização pré-Etapa 16) — mesma
++          autorização de "Novo pedido": ATENDENTE e ADMIN. */}
++      {(user?.role === "ATENDENTE" || user?.role === "ADMIN") && (
++        <Link
++          to="/orders/open"
++          className="mt-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white font-semibold px-6 py-3 text-base transition-colors"
++        >
++          Pedidos em aberto
++        </Link>
++      )}
++
+       {(user?.role === "PRODUCAO" || user?.role === "ADMIN") && (
+         <Link
+           to="/production"
