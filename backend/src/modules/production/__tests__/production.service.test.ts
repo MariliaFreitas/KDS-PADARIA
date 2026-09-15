@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { Prisma } from "@prisma/client";
 
 vi.mock("../../../lib/prisma.js", () => ({
   prisma: {
@@ -54,8 +55,15 @@ interface ItemFixture {
   totalCents: number;
   observation: string | null;
   includedAt: Date;
+  deliveredAt: Date | null;
   additionals: ItemAdditionalFixture[];
-  order: { serviceNumber: number; customerName: string };
+  order: {
+    serviceNumber: number;
+    customerName: string;
+    channel: "BALCAO" | "WHATSAPP";
+    consumptionType: "LOCAL" | "VIAGEM";
+    paymentStatus: "PENDENTE" | "PAGO";
+  };
 }
 
 function item(overrides: Partial<ItemFixture> = {}): ItemFixture {
@@ -77,11 +85,34 @@ function item(overrides: Partial<ItemFixture> = {}): ItemFixture {
     totalCents: 1000,
     observation: null,
     includedAt: new Date("2026-01-01T10:00:00.000Z"),
+    deliveredAt: null,
     additionals: [],
-    order: { serviceNumber: 154, customerName: "Maria" },
+    // BALCAO+PAGO por padrão: nenhum dos dois sozinho já impede a trava de
+    // WHATSAPP+VIAGEM+PENDENTE de disparar, então os testes existentes que
+    // não mexem nesses campos continuam alheios a ela.
+    order: {
+      serviceNumber: 154,
+      customerName: "Maria",
+      channel: "BALCAO",
+      consumptionType: "LOCAL",
+      paymentStatus: "PAGO",
+    },
     ...overrides,
   };
 }
+
+// Tipo preciso do payload que getStationQueue de fato recebe do Prisma para
+// esse cenário específico (item() sozinho carrega um "order" mais largo,
+// usado pelos testes da trava WHATSAPP+VIAGEM abaixo) — reflete
+// exatamente o include: { additionals: true, order: { select: {...} } }
+// da query real em production.service.ts, sem inventar um "unknown"
+// incompatível nem mascarar o tipo.
+type StationQueueOrderItemRow = Prisma.OrderItemGetPayload<{
+  include: {
+    additionals: true;
+    order: { select: { serviceNumber: true; customerName: true } };
+  };
+}>;
 
 describe("production.service", () => {
   beforeEach(() => {
@@ -131,7 +162,7 @@ describe("production.service", () => {
       expect(result).toEqual([{ id: "station-2", name: "Estação 2", active: false }]);
     });
 
-    it("consulta itens somente com requiresProductionSnapshot=true e status PENDENTE/EM_PREPARO", async () => {
+    it("consulta itens somente com requiresProductionSnapshot=true e status PENDENTE/EM_PREPARO, excluindo WHATSAPP+VIAGEM+PENDENTE", async () => {
       vi.mocked(prisma.station.findMany).mockResolvedValue([]);
       vi.mocked(prisma.orderItem.findMany).mockResolvedValue([]);
 
@@ -141,15 +172,42 @@ describe("production.service", () => {
         where: {
           requiresProductionSnapshot: true,
           status: { in: ["PENDENTE", "EM_PREPARO"] },
+          NOT: {
+            order: { channel: "WHATSAPP", consumptionType: "VIAGEM", paymentStatus: "PENDENTE" },
+          },
         },
       });
+    });
+
+    it("não inclui estação inativa cujo único trabalho pendente é de um pedido WHATSAPP+VIAGEM ainda não pago", async () => {
+      vi.mocked(prisma.station.findMany).mockResolvedValue([station({ active: false })]);
+      // O filtro NOT do where (verificado no teste acima) é quem garante,
+      // contra o banco real, que esse item nunca chega aqui — o mock abaixo
+      // simula exatamente esse resultado já filtrado.
+      vi.mocked(prisma.orderItem.findMany).mockResolvedValue([]);
+
+      const result = await listProductionStations();
+
+      expect(result).toEqual([]);
     });
   });
 
   describe("getStationQueue", () => {
     it("retorna item PENDENTE da estação, só com os dados operacionais", async () => {
       vi.mocked(prisma.station.findUnique).mockResolvedValue(station());
-      vi.mocked(prisma.orderItem.findMany).mockResolvedValue([item({ status: "PENDENTE" })]);
+      // order aqui é só {serviceNumber, customerName} de propósito: é
+      // exatamente o que o include:{order:{select:{...}}} da query real
+      // devolveria — diferente do fixture padrão de item(), que carrega
+      // channel/consumptionType/paymentStatus só para os testes da trava
+      // de WHATSAPP+VIAGEM (ver describe mais abaixo). Tipado explicitamente
+      // como o payload real (Prisma.OrderItemGetPayload), não como o
+      // ItemFixture local — que tem um "order" mais largo.
+      const queueRow: StationQueueOrderItemRow = {
+        ...item({ status: "PENDENTE" }),
+        additionals: [],
+        order: { serviceNumber: 154, customerName: "Maria" },
+      };
+      vi.mocked(prisma.orderItem.findMany).mockResolvedValue([queueRow]);
 
       const result = await getStationQueue("station-1");
 
@@ -199,7 +257,7 @@ describe("production.service", () => {
       ]);
     });
 
-    it("consulta usando stationIdSnapshot, nunca o cadastro atual do produto", async () => {
+    it("consulta usando stationIdSnapshot, nunca o cadastro atual do produto, excluindo WHATSAPP+VIAGEM+PENDENTE", async () => {
       vi.mocked(prisma.station.findUnique).mockResolvedValue(station());
       vi.mocked(prisma.orderItem.findMany).mockResolvedValue([]);
 
@@ -210,6 +268,9 @@ describe("production.service", () => {
           stationIdSnapshot: "station-1",
           requiresProductionSnapshot: true,
           status: { in: ["PENDENTE", "EM_PREPARO"] },
+          NOT: {
+            order: { channel: "WHATSAPP", consumptionType: "VIAGEM", paymentStatus: "PENDENTE" },
+          },
         },
         orderBy: { includedAt: "asc" },
         include: {
@@ -331,6 +392,94 @@ describe("production.service", () => {
         code: "ORDER_ITEM_NOT_FOUND",
       });
       expect(prisma.orderItem.update).not.toHaveBeenCalled();
+    });
+
+    describe("trava WHATSAPP+VIAGEM ainda não pago (Etapa 14)", () => {
+      it("bloqueia PENDENTE -> EM_PREPARO com 409 PRODUCTION_BLOCKED_UNTIL_PAID quando o pedido é WHATSAPP+VIAGEM+PENDENTE", async () => {
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+          item({
+            status: "PENDENTE",
+            order: {
+              serviceNumber: 154,
+              customerName: "Maria",
+              channel: "WHATSAPP",
+              consumptionType: "VIAGEM",
+              paymentStatus: "PENDENTE",
+            },
+          }),
+        );
+
+        await expect(advanceItem("station-1", "item-1")).rejects.toMatchObject({
+          statusCode: 409,
+          code: "PRODUCTION_BLOCKED_UNTIL_PAID",
+        });
+        expect(prisma.orderItem.update).not.toHaveBeenCalled();
+      });
+
+      it("permite PENDENTE -> EM_PREPARO de item WHATSAPP+VIAGEM normalmente depois que paymentStatus=PAGO", async () => {
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+          item({
+            status: "PENDENTE",
+            order: {
+              serviceNumber: 154,
+              customerName: "Maria",
+              channel: "WHATSAPP",
+              consumptionType: "VIAGEM",
+              paymentStatus: "PAGO",
+            },
+          }),
+        );
+        vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+
+        const result = await advanceItem("station-1", "item-1");
+
+        expect(result.status).toBe("EM_PREPARO");
+        expect(prisma.orderItem.update).toHaveBeenCalledWith({
+          where: { id: "item-1" },
+          data: { status: "EM_PREPARO" },
+          include: { additionals: true },
+        });
+      });
+
+      it("continua permitindo BALCAO+VIAGEM preparar antes de pagar — a trava não é geral para VIAGEM", async () => {
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+          item({
+            status: "PENDENTE",
+            order: {
+              serviceNumber: 154,
+              customerName: "Maria",
+              channel: "BALCAO",
+              consumptionType: "VIAGEM",
+              paymentStatus: "PENDENTE",
+            },
+          }),
+        );
+        vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+
+        const result = await advanceItem("station-1", "item-1");
+
+        expect(result.status).toBe("EM_PREPARO");
+      });
+
+      it("continua permitindo WHATSAPP+LOCAL preparar antes de pagar", async () => {
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+          item({
+            status: "PENDENTE",
+            order: {
+              serviceNumber: 154,
+              customerName: "Maria",
+              channel: "WHATSAPP",
+              consumptionType: "LOCAL",
+              paymentStatus: "PENDENTE",
+            },
+          }),
+        );
+        vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+
+        const result = await advanceItem("station-1", "item-1");
+
+        expect(result.status).toBe("EM_PREPARO");
+      });
     });
   });
 });

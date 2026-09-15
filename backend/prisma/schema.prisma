@@ -6,9 +6,6 @@
 //   partir dos itens ativos (ver seção M/26 da especificação), nunca gravado
 //   diretamente. Isso evita qualquer risco de o banco "esquecer" de atualizar
 //   o status.
-// - "Entrega" é representada por um único campo simples (Order.deliveredAt),
-//   sem criar um novo status — o ponto sobre se isso se aplica também ao
-//   consumo local segue em aberto na especificação.
 // - Pagamento vive como campos dentro do próprio Order (não é uma tabela
 //   separada), por ser a alternativa mais simples para o comportamento
 //   descrito (PENDENTE/PAGO + baixa).
@@ -19,6 +16,14 @@
 //   pela tabela ServiceNumberSlot — nunca calculado em memória nem com
 //   max+1 sem proteção. orderNumber continua único e permanente, sem
 //   nenhuma relação com o ciclo de reuso do serviceNumber.
+// - "Entrega" não é um campo único: OrderItem.deliveredAt registra a
+//   entrega de cada item individualmente (Etapa 14) — sem criar nenhuma
+//   entidade nova, continua representada pelo próprio Order + OrderItem.
+//   Order.deliveredAt é o agregado do pedido inteiro: preenchido
+//   automaticamente, dentro da mesma transação da última entrega, quando
+//   todo item não cancelado do pedido já estiver com deliveredAt != null —
+//   nunca gravado direto, nunca por um endpoint que o frontend chama para
+//   declarar o pedido inteiro entregue.
 
 generator client {
   provider = "prisma-client-js"
@@ -256,6 +261,11 @@ model OrderItem {
 
   observation String?
   includedAt  DateTime @default(now())
+
+  // Entrega deste item específico (Etapa 14) — independente do status de
+  // preparo acima: item sem produção pode ser entregue sem nunca ter
+  // passado por PRONTO. null = ainda não entregue.
+  deliveredAt DateTime?
 
   additionals    OrderItemAdditional[]
   historyEntries OrderHistory[]

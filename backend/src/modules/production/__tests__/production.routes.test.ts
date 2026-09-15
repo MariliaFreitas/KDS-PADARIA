@@ -59,6 +59,7 @@ const advancedItemFixture = {
   totalCents: 1000,
   observation: null,
   includedAt: new Date("2026-01-01T10:00:00.000Z"),
+  deliveredAt: null,
   additionals: [],
 };
 
@@ -239,6 +240,23 @@ describe("rotas de produção", () => {
 
       expect(response.status).toBe(409);
       expect(response.body.code).toBe(ErrorCode.ORDER_ITEM_ADVANCE_NOT_ALLOWED);
+    });
+
+    it("mapeia PRODUCTION_BLOCKED_UNTIL_PAID do service para 409 (WHATSAPP+VIAGEM ainda não pago)", async () => {
+      vi.mocked(productionService.advanceItem).mockRejectedValue(
+        new AppError(
+          "Pedido feito por WhatsApp para viagem só entra em preparo depois de pago.",
+          409,
+          ErrorCode.PRODUCTION_BLOCKED_UNTIL_PAID,
+        ),
+      );
+
+      const response = await request(app)
+        .patch("/api/production/stations/station-1/items/item-1/advance")
+        .set("Authorization", `Bearer ${producaoToken}`);
+
+      expect(response.status).toBe(409);
+      expect(response.body.code).toBe(ErrorCode.PRODUCTION_BLOCKED_UNTIL_PAID);
     });
   });
 });

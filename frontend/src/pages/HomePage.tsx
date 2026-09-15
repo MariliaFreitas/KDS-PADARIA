@@ -56,6 +56,18 @@ export default function HomePage() {
         </Link>
       )}
 
+      {/* Retirada/Entrega é um módulo operacional separado do Caixa (que
+          continua exclusivamente financeiro) — só CAIXA tem acesso nesta
+          etapa, sem conceder ADMIN automaticamente. */}
+      {user?.role === "CAIXA" && (
+        <Link
+          to="/delivery"
+          className="mt-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold px-6 py-3 text-base transition-colors"
+        >
+          Retirada/Entrega
+        </Link>
+      )}
+
       {user?.role === "ADMIN" && (
         <div className="mt-2 flex flex-wrap justify-center gap-2">
           <Link

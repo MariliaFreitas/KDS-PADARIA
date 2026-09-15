@@ -68,12 +68,27 @@ export const ErrorCode = {
   ORDER_ITEM_ADVANCE_NOT_ALLOWED: "ORDER_ITEM_ADVANCE_NOT_ALLOWED",
   /** Pedido já está com paymentStatus=PAGO — bloqueia inclusão de novo item. */
   ORDER_ALREADY_PAID: "ORDER_ALREADY_PAID",
-  /** Pedido está cancelado — não pode ter pagamento confirmado. */
+  /** Pedido está cancelado — não pode ter pagamento confirmado nem item entregue (Etapa 14). */
   ORDER_CANCELLED: "ORDER_CANCELLED",
   /** Pagamento já havia sido confirmado para este pedido (dupla confirmação, inclusive concorrente). */
   PAYMENT_ALREADY_CONFIRMED: "PAYMENT_ALREADY_CONFIRMED",
   /** Pedido sem nenhum item cobrável (todos cancelados ou nenhum item incluído) — nada a cobrar. */
   PAYMENT_NOTHING_TO_CHARGE: "PAYMENT_NOTHING_TO_CHARGE",
+  /** Item está com status=CANCELADO — não pode ser marcado como entregue (Etapa 14). */
+  ORDER_ITEM_CANCELLED: "ORDER_ITEM_CANCELLED",
+  /** Item já tinha deliveredAt preenchido — segunda tentativa de entrega é rejeitada, não ignorada (Etapa 14). */
+  ORDER_ITEM_ALREADY_DELIVERED: "ORDER_ITEM_ALREADY_DELIVERED",
+  /** Item exige produção (requiresProductionSnapshot=true) mas ainda não está com status=PRONTO (Etapa 14). */
+  ORDER_ITEM_NOT_READY_FOR_DELIVERY: "ORDER_ITEM_NOT_READY_FOR_DELIVERY",
+  /** Pedido consumptionType=VIAGEM ainda não pago — entrega só depois de paymentStatus=PAGO (Etapa 14). Pedido LOCAL não tem essa exigência. */
+  PAYMENT_REQUIRED_FOR_DELIVERY: "PAYMENT_REQUIRED_FOR_DELIVERY",
+  /**
+   * Item de pedido WHATSAPP+VIAGEM ainda não pago (paymentStatus=PENDENTE):
+   * não pode entrar em preparo (PENDENTE -> EM_PREPARO) enquanto o pedido
+   * não for pago (Etapa 14). As demais combinações de canal/consumo não são
+   * afetadas por essa trava.
+   */
+  PRODUCTION_BLOCKED_UNTIL_PAID: "PRODUCTION_BLOCKED_UNTIL_PAID",
   /** Falha não prevista. */
   INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;

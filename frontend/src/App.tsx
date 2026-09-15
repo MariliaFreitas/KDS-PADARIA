@@ -13,6 +13,7 @@ import AddItemPage from "./features/orders/AddItemPage.js";
 import ProductionStationsPage from "./features/production/ProductionStationsPage.js";
 import ProductionKdsPage from "./features/production/ProductionKdsPage.js";
 import CashierPage from "./features/cashier/CashierPage.js";
+import DeliveryPage from "./features/delivery/DeliveryPage.js";
 
 export default function App() {
   return (
@@ -105,6 +106,17 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["CAIXA", "ADMIN"]}>
                 <CashierPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/delivery"
+            element={
+              // Só CAIXA nesta etapa — ADMIN não é concedido automaticamente,
+              // ao contrário dos outros módulos (decisão explícita da
+              // Etapa 14, não uma omissão).
+              <ProtectedRoute allowedRoles={["CAIXA"]}>
+                <DeliveryPage />
               </ProtectedRoute>
             }
           />

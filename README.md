@@ -28,7 +28,7 @@ sistema. Nenhum dado operacional de padaria específica existe no código.
 - [x] **Etapa 11 — Roteamento para estações** (o roteamento de um item para uma estação é sempre derivado do cadastro atual do produto, nunca do cliente: produto sem produção nunca recebe estação no item, mesmo com `stationId` residual no cadastro; produto com produção exige uma estação ativa configurada — sem isso o item não é criado; a estação é congelada em `stationIdSnapshot`/`stationNameSnapshot` no momento da criação do item e nunca é reescrita depois, mesmo que o produto ou a estação mudem; fila/KDS de produção ficam para a Etapa 12)
 - [x] **Etapa 12 — Preparo/KDS** (fila de preparo por estação: `GET /api/production/stations`, `GET /api/production/stations/:stationId/items`, `PATCH .../advance`, restrito a PRODUCAO/ADMIN; a fila usa sempre `stationIdSnapshot`/`requiresProductionSnapshot` do item, nunca o cadastro atual do produto; status só avança PENDENTE→EM_PREPARO→PRONTO; tela `/production` para escolher a estação e `/production/stations/:stationId` para o KDS)
 - [x] **Etapa 13 — Caixa** (conta aberta é só `paymentStatus=PENDENTE` e não cancelado — nenhuma coluna nova para isso; `GET /api/cashier/orders` lista, busca por número operacional (aceita `27` ou `#27`) ou nome do cliente, e traz o resumo dos itens cobráveis de cada pedido (produto, quantidade/peso, variação e adicionais, sempre excluindo itens CANCELADO); `PATCH /api/cashier/orders/:orderId/confirm-payment` confirma pagamento com total sempre recalculado no servidor a partir dos itens não cancelados, restrito a CAIXA/ADMIN; item novo é rejeitado em pedido já pago (`ORDER_ALREADY_PAID`); número operacional (`serviceNumber`) é um número reutilizável e independente do `orderNumber` técnico — alocado por um pool com constraint de unicidade, nunca por contagem em memória, e só volta a ficar disponível 7h depois do pagamento; tela `/cashier` restrita a CAIXA/ADMIN)
-- [ ] Etapa 14 — Retirada/entrega
+- [x] **Etapa 14 — Retirada/Entrega** (módulo operacional separado do Caixa, que continua exclusivamente financeiro: `GET /api/delivery/orders` lista pedidos ainda não concluídos operacionalmente — não cancelados, `Order.deliveredAt=null`, com pelo menos um item válido sem entrega — com a mesma busca por número operacional/nome do Caixa; `PATCH /api/delivery/orders/:orderId/items/:itemId/deliver` entrega um item, restrito a CAIXA (ADMIN não é concedido automaticamente nesta etapa); item exige `status=PRONTO` quando `requiresProductionSnapshot=true`, mas item sem produção entrega sem nunca passar por PRONTO; pedido VIAGEM só entrega depois de pago, pedido LOCAL entrega mesmo com pagamento pendente; item CANCELADO nunca é entregue nem bloqueia o fechamento do pedido; `Order.deliveredAt` é preenchido sozinho, dentro da mesma operação transacional, quando o último item válido é entregue — nunca por um endpoint que o frontend chama para declarar o pedido inteiro entregue; entrega registrada no `OrderHistory` com `ITEM_DELIVERED`; item WHATSAPP+VIAGEM ainda não pago não entra em preparo — nem aparece na fila do KDS, nem avança via chamada direta a `advance`, só depois de `paymentStatus=PAGO`; tela `/delivery`)
 - [ ] Etapa 15 — Histórico
 - [ ] Etapa 16 — Tempo real
 
@@ -71,39 +71,48 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 ```
 
 O schema é aplicado sempre pelo histórico de migrations em
-`prisma/migrations/` — não use mais `prisma db push` para isso, nem em banco
-novo. O histórico tem duas migrations: uma baseline (`20260913000000_baseline`,
-representando o schema completo de antes desta etapa) e uma incremental
-(`20260914000000_add_service_number_and_pool`, só com o que esta etapa
-adiciona).
+`prisma/migrations/` — não use `prisma db push` para isso, nem em banco novo.
+O histórico tem três migrations: uma baseline (`20260913000000_baseline`,
+representando o schema completo de antes da Etapa 13), uma incremental da
+Etapa 13 (`20260914000000_add_service_number_and_pool`) e uma incremental da
+Etapa 14 (`20260915000000_add_order_item_delivered_at`, só a coluna
+`OrderItem.deliveredAt` — sem backfill: item já existente fica
+automaticamente "ainda não entregue", que é o estado correto para ele).
 
-**Banco novo, sem nenhuma tabela ainda:** roda o histórico inteiro do zero —
-baseline primeiro, incremental depois:
+**Banco novo, sem nenhuma tabela ainda:** roda o histórico inteiro do zero,
+na ordem em que as migrations existem:
 
 ```bash
 npx prisma migrate deploy
 npm run seed
 ```
 
-**Banco já em uso, com tabelas e pedidos de antes desta etapa** (schema
+**Banco já em uso, de antes de qualquer uma dessas migrations** (schema
 aplicado até aqui por `db push` ou qualquer outro meio fora de migrations):
 já tem o schema da baseline, então rodar a baseline de novo tentaria recriar
 tabelas que já existem. Marque-a como já aplicada, sem executá-la, e deixe o
-`migrate deploy` aplicar só o que falta (a migration incremental desta
-etapa):
+`migrate deploy` aplicar o que falta (as duas incrementais, em ordem):
 
 ```bash
 npx prisma migrate resolve --applied 20260913000000_baseline
 npx prisma migrate deploy
 ```
 
-A migration incremental cria a coluna `serviceNumber` e a tabela
+**Banco que já tinha a Etapa 13 aplicada** (baseline + `service_number_slots`
+já existentes): não precisa de nenhum `resolve` — falta só a migration desta
+etapa, e `migrate deploy` aplica exatamente ela:
+
+```bash
+npx prisma migrate deploy
+```
+
+A migration da Etapa 13 cria a coluna `serviceNumber` e a tabela
 `service_number_slots`, e já dá a cada pedido existente um `serviceNumber`
 válido e o slot correspondente na mesma transação — pedido aberto ou
 cancelado sem pagamento confirmado não libera o número (`reusableAt = NULL`);
 pedido pago libera só em `paidAt + 7h` — sem apagar nem renumerar nada, e sem
 depender de nenhum passo manual depois. `orderNumber` nunca é alterado. Não
-há mais nenhum script separado de backfill: o próprio `migrate deploy` é o
+existe nenhum script separado de backfill: o próprio `migrate deploy` é o
 único fluxo, tanto para banco novo quanto para banco existente.
 
 Em ambos os casos, o seed cria apenas o usuário administrador. Nenhum
@@ -209,8 +218,9 @@ kds-padaria/
 │   │   ├── schema.prisma                  # modelo do banco
 │   │   ├── seed.ts                        # cria apenas o usuário administrador
 │   │   └── migrations/                    # histórico do banco (versionado)
-│   │       ├── 20260913000000_baseline/                   # schema completo anterior a esta etapa
-│   │       └── 20260914000000_add_service_number_and_pool/ # delta desta etapa (serviceNumber + backfill)
+│   │       ├── 20260913000000_baseline/                     # schema completo anterior à Etapa 13
+│   │       ├── 20260914000000_add_service_number_and_pool/  # delta da Etapa 13 (serviceNumber + backfill)
+│   │       └── 20260915000000_add_order_item_delivered_at/  # delta da Etapa 14 (OrderItem.deliveredAt)
 │   └── src/
 │       ├── server.ts              # bootstrap
 │       ├── app.ts                 # montagem do Express

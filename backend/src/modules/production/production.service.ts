@@ -1,4 +1,4 @@
-import type { OrderItem, OrderItemAdditional, OrderItemStatus, Station } from "@prisma/client";
+import type { OrderItem, OrderItemAdditional, OrderItemStatus, Prisma, Station } from "@prisma/client";
 import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
@@ -9,6 +9,24 @@ const QUEUE_STATUSES: OrderItemStatus[] = ["PENDENTE", "EM_PREPARO"];
 const NEXT_STATUS: Partial<Record<OrderItemStatus, OrderItemStatus>> = {
   PENDENTE: "EM_PREPARO",
   EM_PREPARO: "PRONTO",
+};
+
+/**
+ * BALCAO+LOCAL, BALCAO+VIAGEM e WHATSAPP+LOCAL sempre preparam antes de
+ * pagar — só WHATSAPP+VIAGEM é diferente (Etapa 14): enquanto o pedido
+ * estiver com paymentStatus=PENDENTE, um item que exige produção nem
+ * aparece como trabalho pendente para a estação. Não é uma trava geral de
+ * VIAGEM: BALCAO+VIAGEM continua preparando normalmente antes do
+ * pagamento.
+ */
+const BLOCKED_BY_UNPAID_WHATSAPP_TRAVEL: Prisma.OrderItemWhereInput = {
+  NOT: {
+    order: {
+      channel: "WHATSAPP",
+      consumptionType: "VIAGEM",
+      paymentStatus: "PENDENTE",
+    },
+  },
 };
 
 export interface ProductionStation {
@@ -30,6 +48,7 @@ export async function listProductionStations(): Promise<ProductionStation[]> {
       where: {
         requiresProductionSnapshot: true,
         status: { in: QUEUE_STATUSES },
+        ...BLOCKED_BY_UNPAID_WHATSAPP_TRAVEL,
       },
     }),
   ]);
@@ -83,6 +102,7 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
       stationIdSnapshot: stationId,
       requiresProductionSnapshot: true,
       status: { in: QUEUE_STATUSES },
+      ...BLOCKED_BY_UNPAID_WHATSAPP_TRAVEL,
     },
     orderBy: { includedAt: "asc" },
     include: {
@@ -117,6 +137,12 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
  * "Item inexistente", "item de outra estação" e "item sem preparo"
  * recebem a mesma resposta de propósito: do ponto de vista desta estação,
  * nenhum desses itens faz parte da sua fila.
+ *
+ * Não basta esconder um item WHATSAPP+VIAGEM+PENDENTE da fila (Etapa 14):
+ * uma chamada direta a este endpoint também precisa ser barrada tentando
+ * transformá-lo de PENDENTE para EM_PREPARO enquanto o pedido não for
+ * pago. Depois de paymentStatus=PAGO, o fluxo normal volta a valer sem
+ * nenhuma trava — e nenhuma outra combinação de canal/consumo é afetada.
  */
 export async function advanceItem(
   stationId: string,
@@ -124,11 +150,27 @@ export async function advanceItem(
 ): Promise<OrderItem & { additionals: OrderItemAdditional[] }> {
   const item = await prisma.orderItem.findUnique({
     where: { id: itemId },
-    include: { additionals: true },
+    include: {
+      additionals: true,
+      order: { select: { channel: true, consumptionType: true, paymentStatus: true } },
+    },
   });
 
   if (!item || !item.requiresProductionSnapshot || item.stationIdSnapshot !== stationId) {
     throw new AppError("Item não encontrado nesta estação.", 404, ErrorCode.ORDER_ITEM_NOT_FOUND);
+  }
+
+  if (
+    item.status === "PENDENTE" &&
+    item.order.channel === "WHATSAPP" &&
+    item.order.consumptionType === "VIAGEM" &&
+    item.order.paymentStatus === "PENDENTE"
+  ) {
+    throw new AppError(
+      "Pedido feito por WhatsApp para viagem só entra em preparo depois de pago.",
+      409,
+      ErrorCode.PRODUCTION_BLOCKED_UNTIL_PAID,
+    );
   }
 
   const nextStatus = NEXT_STATUS[item.status];
