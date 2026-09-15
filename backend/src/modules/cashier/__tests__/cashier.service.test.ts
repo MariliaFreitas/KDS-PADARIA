@@ -307,7 +307,12 @@ describe("cashier.service", () => {
 
       await listOpenOrders("   ");
 
-      const call = vi.mocked(prisma.order.findMany).mock.calls[0][0];
+      const call = vi.mocked(prisma.order.findMany).mock.calls[0]?.[0];
+
+      if (!call) {
+        throw new Error("order.findMany não foi chamado");
+      }
+
       expect(call.where).not.toHaveProperty("OR");
     });
   });
