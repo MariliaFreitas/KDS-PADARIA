@@ -4,6 +4,8 @@ import * as orderItemService from "./order-item.service.js";
 
 export async function addOrderItemHandler(req: Request, res: Response) {
   const input = createOrderItemSchema.parse(req.body);
-  const item = await orderItemService.addOrderItem(req.params.orderId, input);
+  // authenticate + authorize garantem req.user aqui.
+  const userId = req.user!.id;
+  const item = await orderItemService.addOrderItem(req.params.orderId, input, userId);
   res.status(201).json(item);
 }

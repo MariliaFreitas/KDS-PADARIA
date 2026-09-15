@@ -14,14 +14,14 @@ import * as orderItemService from "../order-item.service.js";
 
 const app = createApp("http://localhost:5173");
 
-function tokenFor(role: "ADMIN" | "ATENDENTE" | "CAIXA" | "PRODUCAO"): string {
-  return jwt.sign({ id: "user-1", username: "user", name: "Usuário", role }, env.JWT_SECRET, {
+function tokenFor(role: "ADMIN" | "ATENDENTE" | "CAIXA" | "PRODUCAO", userId = "user-1"): string {
+  return jwt.sign({ id: userId, username: "user", name: "Usuário", role }, env.JWT_SECRET, {
     expiresIn: "1h",
   });
 }
 
-const atendenteToken = tokenFor("ATENDENTE");
-const adminToken = tokenFor("ADMIN");
+const atendenteToken = tokenFor("ATENDENTE", "atendente-1");
+const adminToken = tokenFor("ADMIN", "admin-1");
 const producaoToken = tokenFor("PRODUCAO");
 const caixaToken = tokenFor("CAIXA");
 
@@ -80,7 +80,7 @@ describe("POST /api/orders/:orderId/items", () => {
     expect(orderItemService.addOrderItem).not.toHaveBeenCalled();
   });
 
-  it("permite ATENDENTE adicionar item", async () => {
+  it("permite ATENDENTE adicionar item, usando o id do usuário autenticado", async () => {
     vi.mocked(orderItemService.addOrderItem).mockResolvedValue(createdItemFixture as never);
 
     const response = await request(app)
@@ -90,6 +90,11 @@ describe("POST /api/orders/:orderId/items", () => {
 
     expect(response.status).toBe(201);
     expect(response.body.totalCents).toBe(1000);
+    expect(orderItemService.addOrderItem).toHaveBeenCalledWith(
+      "order-1",
+      expect.objectContaining({ productId: "product-1", quantity: 1 }),
+      "atendente-1",
+    );
   });
 
   it("permite ADMIN adicionar item", async () => {
@@ -173,6 +178,7 @@ describe("POST /api/orders/:orderId/items", () => {
     expect(orderItemService.addOrderItem).toHaveBeenCalledWith(
       "order-1",
       expect.objectContaining({ observation: null }),
+      "atendente-1",
     );
   });
 

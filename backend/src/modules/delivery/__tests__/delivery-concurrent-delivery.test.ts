@@ -33,7 +33,7 @@ interface FakeItemRow {
 function createRaceFakeDb() {
   const orders = new Map<string, FakeOrderRow>();
   const items = new Map<string, FakeItemRow>();
-  const historyEntries: Array<{ orderItemId: string; action: string; userId: string }> = [];
+  const historyEntries: Array<{ orderItemId: string | null; action: string; userId: string }> = [];
   const events: string[] = [];
   const lockQueues = new Map<string, Promise<void>>();
 
@@ -96,7 +96,11 @@ function createRaceFakeDb() {
         },
       },
       orderHistory: {
-        async create({ data }: { data: { orderItemId: string; action: string; userId: string } }) {
+        async create({
+          data,
+        }: {
+          data: { orderItemId: string | null; action: string; userId: string };
+        }) {
           historyEntries.push(data);
           return { id: `history-${historyEntries.length}`, ...data };
         },
@@ -193,10 +197,57 @@ describe("corrida entre duas entregas concorrentes do mesmo item", () => {
       });
     }
 
-    // Só uma entrega de verdade aconteceu, e só um registro de histórico
-    // foi criado — a segunda chamada nunca chega a escrever nada.
+    // Só uma entrega de verdade aconteceu; a segunda chamada nunca chega a
+    // escrever nada. Como este era o único (e último) item válido do
+    // pedido, a chamada vencedora também fecha o pedido na mesma
+    // transação — por isso o histórico tem ITEM_DELIVERED + ORDER_DELIVERED
+    // (2 entradas), nunca duplicado pela segunda chamada.
     expect(db.events.filter((event) => event.startsWith("item-delivered:"))).toHaveLength(1);
-    expect(db.historyEntries).toHaveLength(1);
+    expect(db.historyEntries).toHaveLength(2);
+    expect(db.historyEntries.map((entry) => entry.action).sort()).toEqual([
+      "ITEM_DELIVERED",
+      "ORDER_DELIVERED",
+    ]);
+    expect(db.orders.get("order-1")?.deliveredAt).not.toBeNull();
+  });
+
+  it("quando o pedido tem mais de um item, a entrega do último item gera ORDER_DELIVERED exatamente uma vez mesmo sob duas chamadas concorrentes no mesmo item", async () => {
+    const db = resetFakeDb();
+    db.seedOrder({
+      id: "order-1",
+      cancelledAt: null,
+      consumptionType: "LOCAL",
+      paymentStatus: "PENDENTE",
+      deliveredAt: null,
+    });
+    // item-2 já entregue de antemão: item-1 é o último item válido ainda
+    // pendente — entregá-lo é o que fecha o pedido.
+    db.seedItem({
+      id: "item-1",
+      orderId: "order-1",
+      status: "PENDENTE",
+      requiresProductionSnapshot: false,
+      deliveredAt: null,
+    });
+    db.seedItem({
+      id: "item-2",
+      orderId: "order-1",
+      status: "PENDENTE",
+      requiresProductionSnapshot: false,
+      deliveredAt: new Date("2026-01-01T09:00:00.000Z"),
+    });
+
+    const { deliverItem } = await import("../delivery.service.js");
+
+    await Promise.allSettled([
+      deliverItem("order-1", "item-1", "caixa-1"),
+      deliverItem("order-1", "item-1", "caixa-2"),
+    ]);
+
+    const orderDeliveredEntries = db.historyEntries.filter(
+      (entry) => entry.action === "ORDER_DELIVERED",
+    );
+    expect(orderDeliveredEntries).toHaveLength(1);
     expect(db.orders.get("order-1")?.deliveredAt).not.toBeNull();
   });
 });

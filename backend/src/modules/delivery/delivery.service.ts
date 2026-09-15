@@ -253,10 +253,28 @@ export async function deliverItem(
     );
 
     if (!hasRemainingUndeliveredItem) {
-      await tx.order.updateMany({
+      // updateMany condicional (where: deliveredAt: null) como reivindicação
+      // de quem realmente fecha o pedido: sob concorrência, só uma chamada
+      // encontra Order.deliveredAt ainda null e consegue de fato transicioná-lo
+      // — count=1 só para essa chamada. É exatamente essa reivindicação, e
+      // não apenas "hasRemainingUndeliveredItem", que decide quem grava
+      // ORDER_DELIVERED (Etapa 15): garante o evento exatamente uma vez,
+      // mesmo que duas entregas do último item concorram entre si.
+      const orderClosedClaim = await tx.order.updateMany({
         where: { id: orderId, deliveredAt: null },
         data: { deliveredAt },
       });
+
+      if (orderClosedClaim.count === 1) {
+        await tx.orderHistory.create({
+          data: {
+            orderId,
+            orderItemId: null,
+            action: "ORDER_DELIVERED",
+            userId,
+          },
+        });
+      }
     }
 
     const updated = await tx.orderItem.findUnique({ where: { id: itemId } });

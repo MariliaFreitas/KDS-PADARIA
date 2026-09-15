@@ -42,6 +42,13 @@ function isUniqueConstraintViolation(error: unknown): boolean {
  * um número novo), a transação inteira é abortada e tentada de novo do
  * zero — nunca calculamos o número fora de uma transação nem assumimos
  * que o primeiro candidato vai vencer.
+ *
+ * Etapa 15: registra ORDER_CREATED no histórico dentro da MESMA transação,
+ * depois que o serviceNumber já foi realmente alocado — nunca antes. Como
+ * prisma.$transaction desfaz tudo automaticamente quando a transação é
+ * abortada (inclusive por colisão de número, ver isUniqueConstraintViolation
+ * abaixo), um retry nunca duplica esse registro: ou a tentativa inteira
+ * commita com exatamente um ORDER_CREATED, ou é revertida por completo.
  */
 export async function createOrder(
   input: CreateOrderInput,
@@ -62,10 +69,23 @@ export async function createOrder(
 
         const serviceNumber = await allocateServiceNumber(tx, order.id);
 
-        return tx.order.update({
+        const updated = await tx.order.update({
           where: { id: order.id },
           data: { serviceNumber },
         });
+
+        await tx.orderHistory.create({
+          data: {
+            orderId: updated.id,
+            orderItemId: null,
+            action: "ORDER_CREATED",
+            userId: createdByUserId,
+            previousState: null,
+            newState: null,
+          },
+        });
+
+        return updated;
       });
     } catch (error) {
       const isLastAttempt = attempt === MAX_CREATE_ATTEMPTS;

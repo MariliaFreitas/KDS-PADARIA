@@ -12,6 +12,9 @@ vi.mock("../../../lib/prisma.js", () => ({
       updateMany: vi.fn(),
       create: vi.fn(),
     },
+    orderHistory: {
+      create: vi.fn(),
+    },
     $transaction: vi.fn(),
   },
 }));
@@ -64,6 +67,17 @@ describe("order.service", () => {
   describe("createOrder", () => {
     beforeEach(() => {
       vi.mocked(prisma.order.create).mockResolvedValue(baseOrder);
+      vi.mocked(prisma.orderHistory.create).mockResolvedValue({
+        id: "history-1",
+        orderId: "order-1",
+        orderItemId: null,
+        action: "ORDER_CREATED",
+        previousState: null,
+        newState: null,
+        reason: null,
+        userId: "user-1",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      });
     });
 
     it("cria o cabeçalho do pedido com os dados informados e o usuário autenticado", async () => {
@@ -96,6 +110,34 @@ describe("order.service", () => {
         },
       });
       expect(result.serviceNumber).toBe(1);
+    });
+
+    it("registra ORDER_CREATED no histórico, dentro da mesma transação, depois do serviceNumber alocado (Etapa 15)", async () => {
+      vi.mocked(prisma.serviceNumberSlot.findFirst).mockResolvedValue(null);
+      vi.mocked(prisma.serviceNumberSlot.create).mockResolvedValue({
+        id: "slot-1",
+        number: 1,
+        orderId: "order-1",
+        reusableAt: null,
+      });
+      vi.mocked(prisma.order.update).mockResolvedValue({ ...baseOrder, serviceNumber: 1 });
+
+      await createOrder(
+        { customerName: "Maria", channel: "BALCAO", consumptionType: "LOCAL", pickupTime: null },
+        "user-1",
+      );
+
+      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
+        data: {
+          orderId: "order-1",
+          orderItemId: null,
+          action: "ORDER_CREATED",
+          userId: "user-1",
+          previousState: null,
+          newState: null,
+        },
+      });
+      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(1);
     });
 
     it("não envia orderNumber, serviceNumber, paymentStatus ou createdAt ao Prisma", async () => {
@@ -213,6 +255,10 @@ describe("order.service", () => {
 
       expect(prisma.$transaction).toHaveBeenCalledTimes(2);
       expect(result.serviceNumber).toBe(1);
+      // A tentativa que colidiu nunca chega a criar histórico — só a
+      // tentativa que de fato commitou grava ORDER_CREATED, exatamente uma
+      // vez, nunca duplicado por causa do retry.
+      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(1);
     });
 
     it("relança o erro depois de esgotar as tentativas de alocação", async () => {

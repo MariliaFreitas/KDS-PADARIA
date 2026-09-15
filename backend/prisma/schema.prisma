@@ -24,6 +24,13 @@
 //   todo item não cancelado do pedido já estiver com deliveredAt != null —
 //   nunca gravado direto, nunca por um endpoint que o frontend chama para
 //   declarar o pedido inteiro entregue.
+// - Histórico/auditoria (Etapa 15) reaproveita o model OrderHistory já
+//   existente — nenhuma entidade nova. Eventos só passam a ser gravados a
+//   partir de quando o backend começa a chamá-los; pedidos antigos podem
+//   legitimamente ter timeline vazia ou parcial. O módulo de histórico
+//   (backend/src/modules/history) só lista pedidos já fechados
+//   operacionalmente (Order.deliveredAt != null OR Order.cancelledAt !=
+//   null) — pagamento PAGO sozinho nunca é suficiente.
 
 generator client {
   provider = "prisma-client-js"
@@ -302,7 +309,10 @@ model OrderHistory {
   orderItem   OrderItem? @relation(fields: [orderItemId], references: [id])
 
   // Texto livre e curto, ex: "ITEM_CANCELLED", "ORDER_CANCELLED",
-  // "ITEM_ADDED", "ITEM_STATUS_CHANGED", "PAYMENT_CONFIRMED".
+  // "ITEM_ADDED", "ITEM_STATUS_CHANGED", "PAYMENT_CONFIRMED",
+  // "ORDER_CREATED", "ITEM_DELIVERED", "ORDER_DELIVERED" (Etapa 15). Não é
+  // um enum de propósito: nenhuma migração é necessária para o backend
+  // passar a gravar uma ação nova.
   action String
 
   previousState String?

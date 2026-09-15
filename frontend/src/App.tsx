@@ -14,6 +14,8 @@ import ProductionStationsPage from "./features/production/ProductionStationsPage
 import ProductionKdsPage from "./features/production/ProductionKdsPage.js";
 import CashierPage from "./features/cashier/CashierPage.js";
 import DeliveryPage from "./features/delivery/DeliveryPage.js";
+import HistoryPage from "./features/history/HistoryPage.js";
+import HistoryOrderDetailPage from "./features/history/HistoryOrderDetailPage.js";
 
 export default function App() {
   return (
@@ -117,6 +119,22 @@ export default function App() {
               // Etapa 14, não uma omissão).
               <ProtectedRoute allowedRoles={["CAIXA"]}>
                 <DeliveryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <ProtectedRoute allowedRoles={["CAIXA", "ADMIN"]}>
+                <HistoryPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/history/orders/:orderId"
+            element={
+              <ProtectedRoute allowedRoles={["CAIXA", "ADMIN"]}>
+                <HistoryOrderDetailPage />
               </ProtectedRoute>
             }
           />

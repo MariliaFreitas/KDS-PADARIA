@@ -493,6 +493,95 @@ describe("delivery.service", () => {
       });
     });
 
+    it("registra ORDER_DELIVERED quando o último item válido é entregue e a reivindicação do fechamento é bem-sucedida (Etapa 15)", async () => {
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(
+        order({
+          id: "order-1",
+          items: [
+            item({ id: "item-1", status: "PENDENTE" }),
+            item({ id: "item-2", status: "PENDENTE", deliveredAt: new Date("2026-01-02T00:00:00.000Z") }),
+          ],
+        }),
+      );
+      vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+        item({ id: "item-1", deliveredAt: new Date() }),
+      );
+      vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
+
+      await deliverItem("order-1", "item-1", "caixa-1");
+
+      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
+        data: {
+          orderId: "order-1",
+          orderItemId: null,
+          action: "ORDER_DELIVERED",
+          userId: "caixa-1",
+        },
+      });
+      // Exatamente um ITEM_DELIVERED e um ORDER_DELIVERED — nunca mais.
+      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(2);
+    });
+
+    it("não registra ORDER_DELIVERED quando a reivindicação do fechamento não encontra mais Order.deliveredAt=null (perdeu a corrida)", async () => {
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(
+        order({
+          id: "order-1",
+          items: [
+            item({ id: "item-1", status: "PENDENTE" }),
+            item({ id: "item-2", status: "PENDENTE", deliveredAt: new Date("2026-01-02T00:00:00.000Z") }),
+          ],
+        }),
+      );
+      vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+        item({ id: "item-1", deliveredAt: new Date() }),
+      );
+      // Outra transação concorrente já fechou o pedido entre a leitura e a
+      // atualização — o updateMany condicional não encontra mais
+      // deliveredAt=null.
+      vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 0 });
+
+      await deliverItem("order-1", "item-1", "caixa-1");
+
+      const orderDeliveredCalls = vi
+        .mocked(prisma.orderHistory.create)
+        .mock.calls.filter((call: [{ data: { action: string } }]) => call[0].data.action === "ORDER_DELIVERED");
+      expect(orderDeliveredCalls).toHaveLength(0);
+      // O item continua sendo entregue normalmente — só o registro de
+      // fechamento do pedido é que não é criado.
+      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
+        data: {
+          orderId: "order-1",
+          orderItemId: "item-1",
+          action: "ITEM_DELIVERED",
+          newState: "ENTREGUE",
+          userId: "caixa-1",
+        },
+      });
+    });
+
+    it("não registra ORDER_DELIVERED quando ainda sobra item válido pendente", async () => {
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(
+        order({
+          id: "order-1",
+          items: [
+            item({ id: "item-1", status: "PENDENTE" }),
+            item({ id: "item-2", status: "PENDENTE", deliveredAt: null }),
+          ],
+        }),
+      );
+      vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+        item({ id: "item-1", deliveredAt: new Date() }),
+      );
+
+      await deliverItem("order-1", "item-1", "caixa-1");
+
+      expect(prisma.order.updateMany).not.toHaveBeenCalled();
+      const orderDeliveredCalls = vi
+        .mocked(prisma.orderHistory.create)
+        .mock.calls.filter((call: [{ data: { action: string } }]) => call[0].data.action === "ORDER_DELIVERED");
+      expect(orderDeliveredCalls).toHaveLength(0);
+    });
+
     it("item CANCELADO não bloqueia o fechamento do pedido", async () => {
       vi.mocked(prisma.order.findUnique).mockResolvedValue(
         order({

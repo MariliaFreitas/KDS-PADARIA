@@ -302,10 +302,17 @@ async function resolveAdditionals(
  * forma atômica via nested create do Prisma — nada é persistido se
  * qualquer validação de produto/variação/adicional/roteamento falhar
  * antes.
+ *
+ * Etapa 15: userId vem sempre do usuário autenticado (nunca do corpo da
+ * requisição — ver order-item.controller.ts) e é gravado em ITEM_ADDED na
+ * MESMA transação da criação do item, depois que o item já existe (o
+ * registro de histórico referencia orderItemId). Se qualquer validação
+ * anterior falhar, nada é persistido — nem o item, nem o histórico.
  */
 export async function addOrderItem(
   orderId: string,
   input: CreateOrderItemInput,
+  userId: string,
 ): Promise<OrderItemWithAdditionals> {
   // Tudo roda numa única transação, começando pela trava da linha do
   // pedido (getOpenOrder chama lockOrderForUpdate primeiro): garante que
@@ -325,7 +332,7 @@ export async function addOrderItem(
 
     const totalCents = saleTypeFields.subtotalBaseCents + additionalsSubtotalCents;
 
-    return tx.orderItem.create({
+    const createdItem = await tx.orderItem.create({
       data: {
         orderId: order.id,
         productId: product.id,
@@ -347,5 +354,18 @@ export async function addOrderItem(
       },
       include: { additionals: true },
     });
+
+    await tx.orderHistory.create({
+      data: {
+        orderId: order.id,
+        orderItemId: createdItem.id,
+        action: "ITEM_ADDED",
+        userId,
+        previousState: null,
+        newState: null,
+      },
+    });
+
+    return createdItem;
   });
 }

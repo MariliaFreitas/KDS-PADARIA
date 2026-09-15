@@ -10,6 +10,9 @@ vi.mock("../../../lib/prisma.js", () => ({
     serviceNumberSlot: {
       update: vi.fn(),
     },
+    orderHistory: {
+      create: vi.fn(),
+    },
     $transaction: vi.fn(),
     $queryRaw: vi.fn(),
   },
@@ -130,6 +133,17 @@ describe("cashier.service", () => {
       Promise.resolve(callback(prisma)),
     );
     vi.mocked(prisma.$queryRaw).mockResolvedValue([{ id: "order-1" }]);
+    vi.mocked(prisma.orderHistory.create).mockResolvedValue({
+      id: "history-1",
+      orderId: "order-1",
+      orderItemId: null,
+      action: "PAYMENT_CONFIRMED",
+      previousState: "PENDENTE",
+      newState: "PAGO",
+      reason: null,
+      userId: "caixa-1",
+      createdAt: new Date("2026-01-05T12:00:00.000Z"),
+    });
   });
 
   describe("listOpenOrders", () => {
@@ -420,6 +434,57 @@ describe("cashier.service", () => {
       expect(result.paidByUserId).toBe("caixa-1");
     });
 
+    it("registra PAYMENT_CONFIRMED no histórico depois de reivindicar a confirmação (Etapa 15)", async () => {
+      const pendingOrder = order({
+        id: "order-1",
+        items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO" })],
+      });
+      vi.mocked(prisma.order.findUnique).mockResolvedValueOnce(pendingOrder).mockResolvedValueOnce({
+        ...pendingOrder,
+        paymentStatus: "PAGO",
+        paidAt: new Date("2026-01-05T12:00:00.000Z"),
+        paidByUserId: "caixa-1",
+      });
+      vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
+      vi.mocked(prisma.serviceNumberSlot.update).mockResolvedValue({
+        id: "slot-1",
+        number: 7,
+        orderId: "order-1",
+        reusableAt: new Date(),
+      });
+
+      await confirmPayment("order-1", "caixa-1");
+
+      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
+        data: {
+          orderId: "order-1",
+          orderItemId: null,
+          action: "PAYMENT_CONFIRMED",
+          previousState: "PENDENTE",
+          newState: "PAGO",
+          userId: "caixa-1",
+        },
+      });
+      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("não registra um segundo PAYMENT_CONFIRMED quando a confirmação já havia acontecido (dupla confirmação)", async () => {
+      vi.mocked(prisma.order.findUnique).mockResolvedValue(
+        order({
+          id: "order-1",
+          paymentStatus: "PAGO",
+          paidAt: new Date("2026-01-02T00:00:00.000Z"),
+          items: [item({ id: "item-1", totalCents: 1000 })],
+        }),
+      );
+
+      await expect(confirmPayment("order-1", "caixa-1")).rejects.toMatchObject({
+        statusCode: 409,
+        code: "PAYMENT_ALREADY_CONFIRMED",
+      });
+      expect(prisma.orderHistory.create).not.toHaveBeenCalled();
+    });
+
     it("ignora itens PENDENTE/EM_PREPARO/PRONTO igualmente no total — só CANCELADO é excluído", async () => {
       const pendingOrder = order({
         id: "order-1",
@@ -492,6 +557,7 @@ describe("cashier.service", () => {
         code: "PAYMENT_ALREADY_CONFIRMED",
       });
       expect(prisma.serviceNumberSlot.update).not.toHaveBeenCalled();
+      expect(prisma.orderHistory.create).not.toHaveBeenCalled();
     });
   });
 });

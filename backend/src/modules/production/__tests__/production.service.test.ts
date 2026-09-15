@@ -11,7 +11,12 @@ vi.mock("../../../lib/prisma.js", () => ({
       findMany: vi.fn(),
       findUnique: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
     },
+    orderHistory: {
+      create: vi.fn(),
+    },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -312,62 +317,106 @@ describe("production.service", () => {
   });
 
   describe("advanceItem", () => {
+    beforeEach(() => {
+      // advanceItem roda tudo dentro de prisma.$transaction (Etapa 15); como
+      // os mocks abaixo são os mesmos objetos vi.fn() tanto em prisma.* quanto
+      // no "tx" recebido pelo callback, nenhuma asserção muda — só passamos o
+      // mock inteiro como se fosse o client da transação (mesmo padrão de
+      // order.service.test.ts / order-item.service.test.ts).
+      vi.mocked(prisma.$transaction).mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+        Promise.resolve(callback(prisma)),
+      );
+      vi.mocked(prisma.orderItem.updateMany).mockResolvedValue({ count: 1 });
+      vi.mocked(prisma.orderHistory.create).mockResolvedValue({
+        id: "history-1",
+        orderId: "order-1",
+        orderItemId: "item-1",
+        action: "ITEM_STATUS_CHANGED",
+        previousState: "PENDENTE",
+        newState: "EM_PREPARO",
+        reason: null,
+        userId: "producao-1",
+        createdAt: new Date("2026-01-01T00:00:00.000Z"),
+      });
+    });
+
     it("avança PENDENTE -> EM_PREPARO", async () => {
-      vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(item({ status: "PENDENTE" }));
-      vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+      vi.mocked(prisma.orderItem.findUnique)
+        .mockResolvedValueOnce(item({ status: "PENDENTE" }))
+        .mockResolvedValueOnce(item({ status: "EM_PREPARO" }));
 
-      const result = await advanceItem("station-1", "item-1");
+      const result = await advanceItem("station-1", "item-1", "producao-1");
 
-      expect(prisma.orderItem.update).toHaveBeenCalledWith({
-        where: { id: "item-1" },
+      expect(prisma.orderItem.updateMany).toHaveBeenCalledWith({
+        where: { id: "item-1", status: "PENDENTE" },
         data: { status: "EM_PREPARO" },
-        include: { additionals: true },
       });
       expect(result.status).toBe("EM_PREPARO");
     });
 
     it("avança EM_PREPARO -> PRONTO", async () => {
-      vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(item({ status: "EM_PREPARO" }));
-      vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "PRONTO" }));
+      vi.mocked(prisma.orderItem.findUnique)
+        .mockResolvedValueOnce(item({ status: "EM_PREPARO" }))
+        .mockResolvedValueOnce(item({ status: "PRONTO" }));
 
-      const result = await advanceItem("station-1", "item-1");
+      const result = await advanceItem("station-1", "item-1", "producao-1");
 
-      expect(prisma.orderItem.update).toHaveBeenCalledWith({
-        where: { id: "item-1" },
+      expect(prisma.orderItem.updateMany).toHaveBeenCalledWith({
+        where: { id: "item-1", status: "EM_PREPARO" },
         data: { status: "PRONTO" },
-        include: { additionals: true },
       });
       expect(result.status).toBe("PRONTO");
+    });
+
+    it("registra ITEM_STATUS_CHANGED com previousState/newState e o usuário autenticado (Etapa 15)", async () => {
+      vi.mocked(prisma.orderItem.findUnique)
+        .mockResolvedValueOnce(item({ status: "PENDENTE" }))
+        .mockResolvedValueOnce(item({ status: "EM_PREPARO" }));
+
+      await advanceItem("station-1", "item-1", "producao-1");
+
+      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
+        data: {
+          orderId: "order-1",
+          orderItemId: "item-1",
+          action: "ITEM_STATUS_CHANGED",
+          previousState: "PENDENTE",
+          newState: "EM_PREPARO",
+          userId: "producao-1",
+        },
+      });
+      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(1);
     });
 
     it("rejeita avanço de item PRONTO com 409 ORDER_ITEM_ADVANCE_NOT_ALLOWED", async () => {
       vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(item({ status: "PRONTO" }));
 
-      await expect(advanceItem("station-1", "item-1")).rejects.toMatchObject({
+      await expect(advanceItem("station-1", "item-1", "producao-1")).rejects.toMatchObject({
         statusCode: 409,
         code: "ORDER_ITEM_ADVANCE_NOT_ALLOWED",
       });
-      expect(prisma.orderItem.update).not.toHaveBeenCalled();
+      expect(prisma.orderItem.updateMany).not.toHaveBeenCalled();
+      expect(prisma.orderHistory.create).not.toHaveBeenCalled();
     });
 
     it("rejeita avanço de item CANCELADO com 409 ORDER_ITEM_ADVANCE_NOT_ALLOWED", async () => {
       vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(item({ status: "CANCELADO" }));
 
-      await expect(advanceItem("station-1", "item-1")).rejects.toMatchObject({
+      await expect(advanceItem("station-1", "item-1", "producao-1")).rejects.toMatchObject({
         statusCode: 409,
         code: "ORDER_ITEM_ADVANCE_NOT_ALLOWED",
       });
-      expect(prisma.orderItem.update).not.toHaveBeenCalled();
+      expect(prisma.orderItem.updateMany).not.toHaveBeenCalled();
     });
 
     it("rejeita item inexistente com 404 ORDER_ITEM_NOT_FOUND", async () => {
       vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(null);
 
-      await expect(advanceItem("station-1", "inexistente")).rejects.toMatchObject({
+      await expect(advanceItem("station-1", "inexistente", "producao-1")).rejects.toMatchObject({
         statusCode: 404,
         code: "ORDER_ITEM_NOT_FOUND",
       });
-      expect(prisma.orderItem.update).not.toHaveBeenCalled();
+      expect(prisma.orderItem.updateMany).not.toHaveBeenCalled();
     });
 
     it("rejeita item de outra estação com 404 ORDER_ITEM_NOT_FOUND", async () => {
@@ -375,11 +424,11 @@ describe("production.service", () => {
         item({ stationIdSnapshot: "station-2" }),
       );
 
-      await expect(advanceItem("station-1", "item-1")).rejects.toMatchObject({
+      await expect(advanceItem("station-1", "item-1", "producao-1")).rejects.toMatchObject({
         statusCode: 404,
         code: "ORDER_ITEM_NOT_FOUND",
       });
-      expect(prisma.orderItem.update).not.toHaveBeenCalled();
+      expect(prisma.orderItem.updateMany).not.toHaveBeenCalled();
     });
 
     it("rejeita item sem preparo (requiresProductionSnapshot=false) com 404 ORDER_ITEM_NOT_FOUND", async () => {
@@ -387,11 +436,27 @@ describe("production.service", () => {
         item({ requiresProductionSnapshot: false, stationIdSnapshot: null }),
       );
 
-      await expect(advanceItem("station-1", "item-1")).rejects.toMatchObject({
+      await expect(advanceItem("station-1", "item-1", "producao-1")).rejects.toMatchObject({
         statusCode: 404,
         code: "ORDER_ITEM_NOT_FOUND",
       });
-      expect(prisma.orderItem.update).not.toHaveBeenCalled();
+      expect(prisma.orderItem.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("rejeita com 409 ORDER_ITEM_ADVANCE_NOT_ALLOWED quando a reivindicação condicional não casa mais nenhuma linha (corrida perdida)", async () => {
+      // Simula duas chamadas concorrentes na mesma transição: a leitura
+      // ainda vê PENDENTE (a outra chamada já commitou e mudou o status),
+      // mas o updateMany condicional não encontra mais nenhuma linha com
+      // status=PENDENTE — count=0. Mesma resposta de "não é possível
+      // avançar", sem duplicar histórico.
+      vi.mocked(prisma.orderItem.findUnique).mockResolvedValueOnce(item({ status: "PENDENTE" }));
+      vi.mocked(prisma.orderItem.updateMany).mockResolvedValue({ count: 0 });
+
+      await expect(advanceItem("station-1", "item-1", "producao-1")).rejects.toMatchObject({
+        statusCode: 409,
+        code: "ORDER_ITEM_ADVANCE_NOT_ALLOWED",
+      });
+      expect(prisma.orderHistory.create).not.toHaveBeenCalled();
     });
 
     describe("trava WHATSAPP+VIAGEM ainda não pago (Etapa 14)", () => {
@@ -409,74 +474,76 @@ describe("production.service", () => {
           }),
         );
 
-        await expect(advanceItem("station-1", "item-1")).rejects.toMatchObject({
+        await expect(advanceItem("station-1", "item-1", "producao-1")).rejects.toMatchObject({
           statusCode: 409,
           code: "PRODUCTION_BLOCKED_UNTIL_PAID",
         });
-        expect(prisma.orderItem.update).not.toHaveBeenCalled();
+        expect(prisma.orderItem.updateMany).not.toHaveBeenCalled();
       });
 
       it("permite PENDENTE -> EM_PREPARO de item WHATSAPP+VIAGEM normalmente depois que paymentStatus=PAGO", async () => {
-        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
-          item({
-            status: "PENDENTE",
-            order: {
-              serviceNumber: 154,
-              customerName: "Maria",
-              channel: "WHATSAPP",
-              consumptionType: "VIAGEM",
-              paymentStatus: "PAGO",
-            },
-          }),
-        );
-        vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+        vi.mocked(prisma.orderItem.findUnique)
+          .mockResolvedValueOnce(
+            item({
+              status: "PENDENTE",
+              order: {
+                serviceNumber: 154,
+                customerName: "Maria",
+                channel: "WHATSAPP",
+                consumptionType: "VIAGEM",
+                paymentStatus: "PAGO",
+              },
+            }),
+          )
+          .mockResolvedValueOnce(item({ status: "EM_PREPARO" }));
 
-        const result = await advanceItem("station-1", "item-1");
+        const result = await advanceItem("station-1", "item-1", "producao-1");
 
         expect(result.status).toBe("EM_PREPARO");
-        expect(prisma.orderItem.update).toHaveBeenCalledWith({
-          where: { id: "item-1" },
+        expect(prisma.orderItem.updateMany).toHaveBeenCalledWith({
+          where: { id: "item-1", status: "PENDENTE" },
           data: { status: "EM_PREPARO" },
-          include: { additionals: true },
         });
       });
 
       it("continua permitindo BALCAO+VIAGEM preparar antes de pagar — a trava não é geral para VIAGEM", async () => {
-        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
-          item({
-            status: "PENDENTE",
-            order: {
-              serviceNumber: 154,
-              customerName: "Maria",
-              channel: "BALCAO",
-              consumptionType: "VIAGEM",
-              paymentStatus: "PENDENTE",
-            },
-          }),
-        );
-        vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+        vi.mocked(prisma.orderItem.findUnique)
+          .mockResolvedValueOnce(
+            item({
+              status: "PENDENTE",
+              order: {
+                serviceNumber: 154,
+                customerName: "Maria",
+                channel: "BALCAO",
+                consumptionType: "VIAGEM",
+                paymentStatus: "PENDENTE",
+              },
+            }),
+          )
+          .mockResolvedValueOnce(item({ status: "EM_PREPARO" }));
 
-        const result = await advanceItem("station-1", "item-1");
+        const result = await advanceItem("station-1", "item-1", "producao-1");
 
         expect(result.status).toBe("EM_PREPARO");
       });
 
       it("continua permitindo WHATSAPP+LOCAL preparar antes de pagar", async () => {
-        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
-          item({
-            status: "PENDENTE",
-            order: {
-              serviceNumber: 154,
-              customerName: "Maria",
-              channel: "WHATSAPP",
-              consumptionType: "LOCAL",
-              paymentStatus: "PENDENTE",
-            },
-          }),
-        );
-        vi.mocked(prisma.orderItem.update).mockResolvedValue(item({ status: "EM_PREPARO" }));
+        vi.mocked(prisma.orderItem.findUnique)
+          .mockResolvedValueOnce(
+            item({
+              status: "PENDENTE",
+              order: {
+                serviceNumber: 154,
+                customerName: "Maria",
+                channel: "WHATSAPP",
+                consumptionType: "LOCAL",
+                paymentStatus: "PENDENTE",
+              },
+            }),
+          )
+          .mockResolvedValueOnce(item({ status: "EM_PREPARO" }));
 
-        const result = await advanceItem("station-1", "item-1");
+        const result = await advanceItem("station-1", "item-1", "producao-1");
 
         expect(result.status).toBe("EM_PREPARO");
       });

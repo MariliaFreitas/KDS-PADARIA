@@ -16,15 +16,15 @@ import * as productionService from "../production.service.js";
 
 const app = createApp("http://localhost:5173");
 
-function tokenFor(role: "ADMIN" | "ATENDENTE" | "CAIXA" | "PRODUCAO"): string {
-  return jwt.sign({ id: "user-1", username: "user", name: "Usuário", role }, env.JWT_SECRET, {
+function tokenFor(role: "ADMIN" | "ATENDENTE" | "CAIXA" | "PRODUCAO", userId = "user-1"): string {
+  return jwt.sign({ id: userId, username: "user", name: "Usuário", role }, env.JWT_SECRET, {
     expiresIn: "1h",
   });
 }
 
 const atendenteToken = tokenFor("ATENDENTE");
-const adminToken = tokenFor("ADMIN");
-const producaoToken = tokenFor("PRODUCAO");
+const adminToken = tokenFor("ADMIN", "admin-1");
+const producaoToken = tokenFor("PRODUCAO", "producao-1");
 const caixaToken = tokenFor("CAIXA");
 
 const queueItemFixture = {
@@ -189,7 +189,7 @@ describe("rotas de produção", () => {
       expect(productionService.advanceItem).not.toHaveBeenCalled();
     });
 
-    it("permite PRODUCAO avançar um item, sem aceitar status vindo do corpo", async () => {
+    it("permite PRODUCAO avançar um item, sem aceitar status vindo do corpo, usando o id do usuário autenticado", async () => {
       vi.mocked(productionService.advanceItem).mockResolvedValue(advancedItemFixture);
 
       const response = await request(app)
@@ -199,7 +199,11 @@ describe("rotas de produção", () => {
 
       expect(response.status).toBe(200);
       expect(response.body.status).toBe("EM_PREPARO");
-      expect(productionService.advanceItem).toHaveBeenCalledWith("station-1", "item-1");
+      expect(productionService.advanceItem).toHaveBeenCalledWith(
+        "station-1",
+        "item-1",
+        "producao-1",
+      );
     });
 
     it("permite ADMIN avançar um item", async () => {

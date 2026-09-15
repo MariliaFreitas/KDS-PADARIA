@@ -178,6 +178,22 @@ export async function confirmPayment(orderId: string, userId: string): Promise<O
       );
     }
 
+    // Etapa 15: só grava PAYMENT_CONFIRMED depois que a reivindicação
+    // condicional acima confirmou que ESTA chamada foi quem realmente
+    // mudou paymentStatus PENDENTE -> PAGO — uma segunda confirmação
+    // concorrente/duplicada já teria sido rejeitada pelo claim.count acima
+    // e nunca chega aqui, então nunca duplica este registro de histórico.
+    await tx.orderHistory.create({
+      data: {
+        orderId,
+        orderItemId: null,
+        action: "PAYMENT_CONFIRMED",
+        previousState: "PENDENTE",
+        newState: "PAGO",
+        userId,
+      },
+    });
+
     await scheduleServiceNumberReuse(tx, orderId, paidAt);
 
     const updated: Order | null = await tx.order.findUnique({ where: { id: orderId } });

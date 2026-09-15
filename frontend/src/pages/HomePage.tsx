@@ -68,6 +68,18 @@ export default function HomePage() {
         </Link>
       )}
 
+      {/* Histórico (Etapa 15) — CAIXA e ADMIN têm acesso; ATENDENTE e
+          PRODUCAO continuam sem acesso, igual aos demais módulos que não
+          são deles. */}
+      {(user?.role === "CAIXA" || user?.role === "ADMIN") && (
+        <Link
+          to="/history"
+          className="mt-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-6 py-3 text-base transition-colors"
+        >
+          Histórico
+        </Link>
+      )}
+
       {user?.role === "ADMIN" && (
         <div className="mt-2 flex flex-wrap justify-center gap-2">
           <Link

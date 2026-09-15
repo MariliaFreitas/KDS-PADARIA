@@ -133,6 +133,12 @@ function createRaceFakeDb() {
           return { id: "slot-1", number: 5, orderId: "order-1", reusableAt: new Date() };
         },
       },
+      orderHistory: {
+        async create({ data }: { data: { orderItemId: string | null; action: string; userId: string } }) {
+          events.push(`history-created:${data.action}`);
+          return { id: "history-1", ...data };
+        },
+      },
     };
   }
 
@@ -214,11 +220,15 @@ describe("corrida entre inclusão de item e confirmação de pagamento", () => {
     // quem trava a linha do pedido primeiro — vence a corrida por
     // construção, não por sorte.
     const [itemResult, paymentResult] = await Promise.all([
-      addOrderItem("order-1", {
-        productId: "product-1",
-        quantity: 1,
-        observation: null,
-      }),
+      addOrderItem(
+        "order-1",
+        {
+          productId: "product-1",
+          quantity: 1,
+          observation: null,
+        },
+        "atendente-1",
+      ),
       confirmPayment("order-1", "caixa-1"),
     ]);
 
@@ -262,11 +272,15 @@ describe("corrida entre inclusão de item e confirmação de pagamento", () => {
     // corrida por construção.
     const [paymentSettled, itemSettled] = await Promise.allSettled([
       confirmPayment("order-2", "caixa-1"),
-      addOrderItem("order-2", {
-        productId: "product-1",
-        quantity: 1,
-        observation: null,
-      }),
+      addOrderItem(
+        "order-2",
+        {
+          productId: "product-1",
+          quantity: 1,
+          observation: null,
+        },
+        "atendente-1",
+      ),
     ]);
 
     expect(paymentSettled.status).toBe("fulfilled");

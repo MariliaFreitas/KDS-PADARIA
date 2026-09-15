@@ -9,6 +9,7 @@ vi.mock("../../../lib/prisma.js", () => ({
     productVariation: { findUnique: vi.fn() },
     additional: { findUnique: vi.fn() },
     orderItem: { create: vi.fn() },
+    orderHistory: { create: vi.fn() },
   },
 }));
 
@@ -164,6 +165,17 @@ describe("order-item.service", () => {
     vi.mocked(prisma.$queryRaw).mockResolvedValue([{ id: "order-1" }]);
     vi.mocked(prisma.order.findUnique).mockResolvedValue(openOrder);
     vi.mocked(prisma.orderItem.create).mockResolvedValue(createdOrderItemFixture);
+    vi.mocked(prisma.orderHistory.create).mockResolvedValue({
+      id: "history-1",
+      orderId: "order-1",
+      orderItemId: "item-1",
+      action: "ITEM_ADDED",
+      previousState: null,
+      newState: null,
+      reason: null,
+      userId: "user-1",
+      createdAt: new Date("2026-01-01T00:00:00.000Z"),
+    });
   });
 
   describe("pedido", () => {
@@ -171,7 +183,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.order.findUnique).mockResolvedValue(null);
 
       await expect(
-        addOrderItem("inexistente", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("inexistente", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 404, code: "ORDER_NOT_FOUND" });
     });
 
@@ -179,7 +191,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.order.findUnique).mockResolvedValue(cancelledOrder);
 
       await expect(
-        addOrderItem("order-cancelled", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-cancelled", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 409, code: "ORDER_NOT_OPEN" });
     });
 
@@ -187,7 +199,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.order.findUnique).mockResolvedValue(deliveredOrder);
 
       await expect(
-        addOrderItem("order-delivered", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-delivered", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 409, code: "ORDER_NOT_OPEN" });
     });
 
@@ -195,7 +207,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.order.findUnique).mockResolvedValue(paidOrder);
 
       await expect(
-        addOrderItem("order-paid", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-paid", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 409, code: "ORDER_ALREADY_PAID" });
       expect(prisma.product.findUnique).not.toHaveBeenCalled();
     });
@@ -206,7 +218,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue(null);
 
       await expect(
-        addOrderItem("order-1", item({ productId: "inexistente", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "inexistente", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 404, code: "PRODUCT_NOT_FOUND" });
     });
 
@@ -214,7 +226,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue({ ...unitProduct, active: false });
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_NOT_AVAILABLE" });
     });
 
@@ -225,7 +237,7 @@ describe("order-item.service", () => {
       });
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_NOT_AVAILABLE" });
     });
   });
@@ -236,7 +248,7 @@ describe("order-item.service", () => {
     });
 
     it("cria item válido com preço/snapshot/total corretos", async () => {
-      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 2 }));
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 2 }), "user-1");
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
         data: {
@@ -260,9 +272,44 @@ describe("order-item.service", () => {
       });
     });
 
+    it("registra ITEM_ADDED no histórico com o id do item recém-criado e o usuário autenticado (Etapa 15)", async () => {
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 2 }), "user-1");
+
+      expect(prisma.orderHistory.create).toHaveBeenCalledWith({
+        data: {
+          orderId: "order-1",
+          orderItemId: "item-1",
+          action: "ITEM_ADDED",
+          userId: "user-1",
+          previousState: null,
+          newState: null,
+        },
+      });
+      expect(prisma.orderHistory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it("não registra nenhum histórico quando a criação do item falha antes de persistir (ex: adicional inválido)", async () => {
+      vi.mocked(prisma.additional.findUnique).mockResolvedValue(null);
+
+      await expect(
+        addOrderItem(
+          "order-1",
+          item({
+            productId: "product-unit",
+            quantity: 1,
+            additionals: [{ additionalId: "inexistente", quantity: 1 }],
+          }),
+          "user-1",
+        ),
+      ).rejects.toMatchObject({ code: "ADDITIONAL_NOT_FOUND" });
+
+      expect(prisma.orderItem.create).not.toHaveBeenCalled();
+      expect(prisma.orderHistory.create).not.toHaveBeenCalled();
+    });
+
     it("rejeita quantity ausente com ORDER_ITEM_INPUT_INVALID", async () => {
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit" })),
+        addOrderItem("order-1", item({ productId: "product-unit" }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "ORDER_ITEM_INPUT_INVALID" });
     });
 
@@ -270,7 +317,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-unit", quantity: 1, weightGrams: 100 }),
+          item({ productId: "product-unit", quantity: 1, weightGrams: 100 }), "user-1",
         ),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
@@ -279,7 +326,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-unit", quantity: 1, variationId: "variation-1" }),
+          item({ productId: "product-unit", quantity: 1, variationId: "variation-1" }), "user-1",
         ),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
@@ -291,7 +338,7 @@ describe("order-item.service", () => {
       });
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_CONFIGURATION_INVALID" });
     });
   });
@@ -305,7 +352,7 @@ describe("order-item.service", () => {
     it("cria item válido com snapshot de nome/preço e total corretos", async () => {
       await addOrderItem(
         "order-1",
-        item({ productId: "product-variation", quantity: 2, variationId: "variation-1" }),
+        item({ productId: "product-variation", quantity: 2, variationId: "variation-1" }), "user-1",
       );
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
@@ -327,7 +374,7 @@ describe("order-item.service", () => {
 
     it("rejeita variationId ausente", async () => {
       await expect(
-        addOrderItem("order-1", item({ productId: "product-variation", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-variation", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
 
@@ -335,7 +382,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-variation", variationId: "variation-1" }),
+          item({ productId: "product-variation", variationId: "variation-1" }), "user-1",
         ),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
@@ -349,7 +396,7 @@ describe("order-item.service", () => {
             quantity: 1,
             variationId: "variation-1",
             weightGrams: 100,
-          }),
+          }), "user-1",
         ),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
@@ -360,7 +407,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-variation", quantity: 1, variationId: "inexistente" }),
+          item({ productId: "product-variation", quantity: 1, variationId: "inexistente" }), "user-1",
         ),
       ).rejects.toMatchObject({ statusCode: 404, code: "PRODUCT_VARIATION_NOT_FOUND" });
     });
@@ -374,7 +421,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-variation", quantity: 1, variationId: "variation-1" }),
+          item({ productId: "product-variation", quantity: 1, variationId: "variation-1" }), "user-1",
         ),
       ).rejects.toMatchObject({ statusCode: 404, code: "PRODUCT_VARIATION_NOT_FOUND" });
     });
@@ -387,7 +434,7 @@ describe("order-item.service", () => {
 
     it("cria item válido com fórmula e arredondamento corretos", async () => {
       // 250g a R$40,00/kg (4000 centavos/kg): round(250 * 4000 / 1000) = 1000
-      await addOrderItem("order-1", item({ productId: "product-weight", weightGrams: 250 }));
+      await addOrderItem("order-1", item({ productId: "product-weight", weightGrams: 250 }), "user-1");
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -404,7 +451,7 @@ describe("order-item.service", () => {
     it("arredonda corretamente pesos que gerariam centavos fracionários", async () => {
       // 333g a R$40,00/kg: 333*4000/1000 = 1332 (já inteiro, mas testa a
       // fórmula com um valor não redondo)
-      await addOrderItem("order-1", item({ productId: "product-weight", weightGrams: 333 }));
+      await addOrderItem("order-1", item({ productId: "product-weight", weightGrams: 333 }), "user-1");
 
       const call = vi.mocked(prisma.orderItem.create).mock.calls[0][0];
       expect(call.data.totalCents).toBe(Math.round((333 * 4000) / 1000));
@@ -412,7 +459,7 @@ describe("order-item.service", () => {
 
     it("rejeita weightGrams ausente", async () => {
       await expect(
-        addOrderItem("order-1", item({ productId: "product-weight" })),
+        addOrderItem("order-1", item({ productId: "product-weight" }), "user-1"),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
 
@@ -420,7 +467,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-weight", weightGrams: 100, quantity: 1 }),
+          item({ productId: "product-weight", weightGrams: 100, quantity: 1 }), "user-1",
         ),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
@@ -429,7 +476,7 @@ describe("order-item.service", () => {
       await expect(
         addOrderItem(
           "order-1",
-          item({ productId: "product-weight", weightGrams: 100, variationId: "variation-1" }),
+          item({ productId: "product-weight", weightGrams: 100, variationId: "variation-1" }), "user-1",
         ),
       ).rejects.toMatchObject({ code: "ORDER_ITEM_INPUT_INVALID" });
     });
@@ -441,7 +488,7 @@ describe("order-item.service", () => {
       });
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-weight", weightGrams: 100 })),
+        addOrderItem("order-1", item({ productId: "product-weight", weightGrams: 100 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_CONFIGURATION_INVALID" });
     });
   });
@@ -452,7 +499,7 @@ describe("order-item.service", () => {
     });
 
     it("cria item sem nenhum adicional", async () => {
-      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1");
 
       const call = vi.mocked(prisma.orderItem.create).mock.calls[0][0];
       expect(call.data.additionals).toEqual({ create: [] });
@@ -468,7 +515,7 @@ describe("order-item.service", () => {
           productId: "product-unit",
           quantity: 1,
           additionals: [{ additionalId: "additional-1", quantity: 1 }],
-        }),
+        }), "user-1",
       );
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
@@ -508,7 +555,7 @@ describe("order-item.service", () => {
             { additionalId: "additional-1", quantity: 2 },
             { additionalId: "additional-2", quantity: 3 },
           ],
-        }),
+        }), "user-1",
       );
 
       const call = vi.mocked(prisma.orderItem.create).mock.calls[0][0];
@@ -526,7 +573,7 @@ describe("order-item.service", () => {
             productId: "product-unit",
             quantity: 1,
             additionals: [{ additionalId: "inexistente", quantity: 1 }],
-          }),
+          }), "user-1",
         ),
       ).rejects.toMatchObject({ statusCode: 404, code: "ADDITIONAL_NOT_FOUND" });
     });
@@ -541,7 +588,7 @@ describe("order-item.service", () => {
             productId: "product-unit",
             quantity: 1,
             additionals: [{ additionalId: "additional-2", quantity: 1 }],
-          }),
+          }), "user-1",
         ),
       ).rejects.toMatchObject({ statusCode: 400, code: "ADDITIONAL_NOT_AVAILABLE" });
     });
@@ -551,7 +598,7 @@ describe("order-item.service", () => {
     it("congela nome do produto, saleType e requiresProduction", async () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue(unitProduct);
 
-      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1");
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -569,7 +616,7 @@ describe("order-item.service", () => {
 
       await addOrderItem(
         "order-1",
-        item({ productId: "product-variation", quantity: 1, variationId: "variation-1" }),
+        item({ productId: "product-variation", quantity: 1, variationId: "variation-1" }), "user-1",
       );
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
@@ -584,7 +631,7 @@ describe("order-item.service", () => {
     it("não congela estação quando o produto não tem uma", async () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue(unitProduct);
 
-      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1");
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -607,7 +654,7 @@ describe("order-item.service", () => {
 
       vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithResidualStation);
 
-      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1");
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -629,7 +676,7 @@ describe("order-item.service", () => {
 
       vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithActiveStation);
 
-      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }));
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1");
 
       expect(prisma.orderItem.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -652,7 +699,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithoutStation);
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_ROUTING_INVALID" });
       expect(prisma.orderItem.create).not.toHaveBeenCalled();
     });
@@ -668,7 +715,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithOrphanStation);
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "PRODUCT_ROUTING_INVALID" });
       expect(prisma.orderItem.create).not.toHaveBeenCalled();
     });
@@ -684,7 +731,7 @@ describe("order-item.service", () => {
       vi.mocked(prisma.product.findUnique).mockResolvedValue(productWithInactiveStation);
 
       await expect(
-        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 })),
+        addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "STATION_NOT_AVAILABLE" });
       expect(prisma.orderItem.create).not.toHaveBeenCalled();
     });

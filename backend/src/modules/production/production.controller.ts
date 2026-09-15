@@ -12,6 +12,8 @@ export async function getStationQueueHandler(req: Request, res: Response) {
 }
 
 export async function advanceItemHandler(req: Request, res: Response) {
-  const item = await productionService.advanceItem(req.params.stationId, req.params.itemId);
+  // authenticate + authorize garantem req.user aqui.
+  const userId = req.user!.id;
+  const item = await productionService.advanceItem(req.params.stationId, req.params.itemId, userId);
   res.json(item);
 }

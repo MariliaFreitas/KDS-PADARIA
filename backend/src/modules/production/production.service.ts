@@ -143,48 +143,106 @@ export async function getStationQueue(stationId: string): Promise<ProductionQueu
  * transformá-lo de PENDENTE para EM_PREPARO enquanto o pedido não for
  * pago. Depois de paymentStatus=PAGO, o fluxo normal volta a valer sem
  * nenhuma trava — e nenhuma outra combinação de canal/consumo é afetada.
+ *
+ * Etapa 15: registra ITEM_STATUS_CHANGED no histórico e passa a ser
+ * concorrência-segura contra duas chamadas simultâneas na mesma transição —
+ * antes desta etapa a função lia o item e depois fazia um update direto,
+ * sem transação nem reconfirmação: duas chamadas concorrentes liam o mesmo
+ * status PENDENTE e as duas escreviam EM_PREPARO, cada uma achando que
+ * tinha sido a responsável pela transição (e cada uma criaria seu próprio
+ * histórico, duplicando o evento). Agora tudo roda dentro de
+ * prisma.$transaction e a transição é reivindicada com um updateMany
+ * condicional (`where: { id, status: previousStatus }` — mesmo padrão de
+ * confirmPayment/deliverItem): só quem realmente encontra o item ainda no
+ * status esperado consegue mudar o status e criar o histórico; a segunda
+ * chamada, ao tentar a mesma transição, não encontra mais nenhuma linha
+ * com o status antigo (count=0) e recebe o mesmo 409
+ * ORDER_ITEM_ADVANCE_NOT_ALLOWED de quem tenta avançar um item que já não
+ * pode avançar — sem nenhum cast/bypass, e sem duplicar o registro de
+ * histórico.
  */
 export async function advanceItem(
   stationId: string,
   itemId: string,
+  userId: string,
 ): Promise<OrderItem & { additionals: OrderItemAdditional[] }> {
-  const item = await prisma.orderItem.findUnique({
-    where: { id: itemId },
-    include: {
-      additionals: true,
-      order: { select: { channel: true, consumptionType: true, paymentStatus: true } },
-    },
-  });
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const item = await tx.orderItem.findUnique({
+      where: { id: itemId },
+      include: {
+        additionals: true,
+        order: { select: { channel: true, consumptionType: true, paymentStatus: true } },
+      },
+    });
 
-  if (!item || !item.requiresProductionSnapshot || item.stationIdSnapshot !== stationId) {
-    throw new AppError("Item não encontrado nesta estação.", 404, ErrorCode.ORDER_ITEM_NOT_FOUND);
-  }
+    if (!item || !item.requiresProductionSnapshot || item.stationIdSnapshot !== stationId) {
+      throw new AppError(
+        "Item não encontrado nesta estação.",
+        404,
+        ErrorCode.ORDER_ITEM_NOT_FOUND,
+      );
+    }
 
-  if (
-    item.status === "PENDENTE" &&
-    item.order.channel === "WHATSAPP" &&
-    item.order.consumptionType === "VIAGEM" &&
-    item.order.paymentStatus === "PENDENTE"
-  ) {
-    throw new AppError(
-      "Pedido feito por WhatsApp para viagem só entra em preparo depois de pago.",
-      409,
-      ErrorCode.PRODUCTION_BLOCKED_UNTIL_PAID,
-    );
-  }
+    if (
+      item.status === "PENDENTE" &&
+      item.order.channel === "WHATSAPP" &&
+      item.order.consumptionType === "VIAGEM" &&
+      item.order.paymentStatus === "PENDENTE"
+    ) {
+      throw new AppError(
+        "Pedido feito por WhatsApp para viagem só entra em preparo depois de pago.",
+        409,
+        ErrorCode.PRODUCTION_BLOCKED_UNTIL_PAID,
+      );
+    }
 
-  const nextStatus = NEXT_STATUS[item.status];
-  if (!nextStatus) {
-    throw new AppError(
-      "Não é possível avançar este item a partir do status atual.",
-      409,
-      ErrorCode.ORDER_ITEM_ADVANCE_NOT_ALLOWED,
-    );
-  }
+    const previousStatus = item.status;
+    const nextStatus = NEXT_STATUS[previousStatus];
+    if (!nextStatus) {
+      throw new AppError(
+        "Não é possível avançar este item a partir do status atual.",
+        409,
+        ErrorCode.ORDER_ITEM_ADVANCE_NOT_ALLOWED,
+      );
+    }
 
-  return prisma.orderItem.update({
-    where: { id: itemId },
-    data: { status: nextStatus },
-    include: { additionals: true },
+    // Reivindica a transição condicionada ao status já lido acima — só uma
+    // chamada concorrente consegue casar essa condição.
+    const claim = await tx.orderItem.updateMany({
+      where: { id: itemId, status: previousStatus },
+      data: { status: nextStatus },
+    });
+
+    if (claim.count !== 1) {
+      throw new AppError(
+        "Não é possível avançar este item a partir do status atual.",
+        409,
+        ErrorCode.ORDER_ITEM_ADVANCE_NOT_ALLOWED,
+      );
+    }
+
+    await tx.orderHistory.create({
+      data: {
+        orderId: item.orderId,
+        orderItemId: itemId,
+        action: "ITEM_STATUS_CHANGED",
+        previousState: previousStatus,
+        newState: nextStatus,
+        userId,
+      },
+    });
+
+    const updated = await tx.orderItem.findUnique({
+      where: { id: itemId },
+      include: { additionals: true },
+    });
+
+    if (!updated) {
+      // Não deveria acontecer: acabamos de confirmar o update acima, na
+      // mesma transação — mantido como defesa explícita, não como cast.
+      throw new AppError("Falha inesperada ao avançar o item.", 500, ErrorCode.INTERNAL_ERROR);
+    }
+
+    return updated;
   });
 }
