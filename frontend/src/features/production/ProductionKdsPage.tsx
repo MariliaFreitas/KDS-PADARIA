@@ -5,6 +5,8 @@ import { ApiError } from "../../services/apiClient.js";
 import { advanceItem, getStationQueue } from "./productionApi.js";
 import { ProductionItemCard } from "./ProductionItemCard.js";
 import type { ProductionItem } from "./production.types.js";
+import { useRealtimeRefresh } from "../realtime/useRealtimeRefresh.js";
+import { RealtimeIndicator } from "../realtime/RealtimeIndicator.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Não foi possível conectar ao servidor.";
@@ -36,6 +38,16 @@ export default function ProductionKdsPage() {
     load();
   }, [load]);
 
+  // Só refaz o GET quando o evento é desta estação (ou não é de estação
+  // nenhuma) — evento de outra estação não afeta esta fila, então não
+  // precisa disparar refetch aqui. Usa stationIdSnapshot do item (via
+  // stationId do evento), nunca o cadastro atual do produto.
+  const realtimeStatus = useRealtimeRefresh({
+    scopes: ["production"],
+    shouldRefresh: (event) => !event.stationId || event.stationId === stationId,
+    onRefresh: load,
+  });
+
   async function handleAdvance(item: ProductionItem) {
     if (!token || !stationId) return;
     setError(null);
@@ -58,6 +70,7 @@ export default function ProductionKdsPage() {
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold">Preparo</h1>
           <div className="flex items-center gap-4">
+            <RealtimeIndicator status={realtimeStatus} />
             <button
               type="button"
               onClick={load}

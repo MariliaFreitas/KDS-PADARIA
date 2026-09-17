@@ -18,8 +18,13 @@ vi.mock("../../../lib/prisma.js", () => ({
   },
 }));
 
+vi.mock("../../realtime/realtime.service.js", () => ({
+  publishRealtimeEvent: vi.fn(),
+}));
+
 import { prisma } from "../../../lib/prisma.js";
 import { confirmPayment, listOpenOrders } from "../cashier.service.js";
+import { publishRealtimeEvent } from "../../realtime/realtime.service.js";
 
 interface AdditionalFixture {
   id: string;
@@ -558,6 +563,148 @@ describe("cashier.service", () => {
       });
       expect(prisma.serviceNumberSlot.update).not.toHaveBeenCalled();
       expect(prisma.orderHistory.create).not.toHaveBeenCalled();
+    });
+
+    describe("eventos de tempo real", () => {
+      beforeEach(() => {
+        vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 1 });
+        vi.mocked(prisma.serviceNumberSlot.update).mockResolvedValue({
+          id: "slot-1",
+          number: 7,
+          orderId: "order-1",
+          reusableAt: new Date(),
+        });
+      });
+
+      it("publica cashier+orders+delivery depois que o pagamento é confirmado", async () => {
+        const pendingOrder = order({
+          id: "order-1",
+          items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO" })],
+        });
+        vi.mocked(prisma.order.findUnique).mockResolvedValueOnce(pendingOrder).mockResolvedValueOnce({
+          ...pendingOrder,
+          paymentStatus: "PAGO",
+          paidAt: new Date("2026-01-05T12:00:00.000Z"),
+          paidByUserId: "caixa-1",
+        });
+
+        await confirmPayment("order-1", "caixa-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledTimes(1);
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["cashier", "orders", "delivery"],
+          orderId: "order-1",
+        });
+      });
+
+      it("publica production ao confirmar pagamento de um pedido WHATSAPP+VIAGEM com item de produção travado", async () => {
+        const pendingOrder = order({
+          id: "order-1",
+          channel: "WHATSAPP",
+          consumptionType: "VIAGEM",
+          items: [
+            item({
+              id: "item-1",
+              totalCents: 1000,
+              status: "PENDENTE",
+              requiresProductionSnapshot: true,
+            }),
+          ],
+        });
+        vi.mocked(prisma.order.findUnique).mockResolvedValueOnce(pendingOrder).mockResolvedValueOnce({
+          ...pendingOrder,
+          paymentStatus: "PAGO",
+          paidAt: new Date("2026-01-05T12:00:00.000Z"),
+          paidByUserId: "caixa-1",
+        });
+
+        await confirmPayment("order-1", "caixa-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["cashier", "orders", "delivery", "production"],
+          orderId: "order-1",
+        });
+      });
+
+      it("não publica production para WHATSAPP+VIAGEM sem nenhum item de produção pendente", async () => {
+        const pendingOrder = order({
+          id: "order-1",
+          channel: "WHATSAPP",
+          consumptionType: "VIAGEM",
+          items: [item({ id: "item-1", totalCents: 1000, status: "PENDENTE", requiresProductionSnapshot: false })],
+        });
+        vi.mocked(prisma.order.findUnique).mockResolvedValueOnce(pendingOrder).mockResolvedValueOnce({
+          ...pendingOrder,
+          paymentStatus: "PAGO",
+        });
+
+        await confirmPayment("order-1", "caixa-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["cashier", "orders", "delivery"],
+          orderId: "order-1",
+        });
+      });
+
+      it("não publica production para BALCAO+VIAGEM (a trava de pagamento só existe pra WHATSAPP+VIAGEM)", async () => {
+        const pendingOrder = order({
+          id: "order-1",
+          channel: "BALCAO",
+          consumptionType: "VIAGEM",
+          items: [
+            item({
+              id: "item-1",
+              totalCents: 1000,
+              status: "PENDENTE",
+              requiresProductionSnapshot: true,
+            }),
+          ],
+        });
+        vi.mocked(prisma.order.findUnique).mockResolvedValueOnce(pendingOrder).mockResolvedValueOnce({
+          ...pendingOrder,
+          paymentStatus: "PAGO",
+        });
+
+        await confirmPayment("order-1", "caixa-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["cashier", "orders", "delivery"],
+          orderId: "order-1",
+        });
+      });
+
+      it("não publica nada quando a confirmação é rejeitada (pedido já pago)", async () => {
+        vi.mocked(prisma.order.findUnique).mockResolvedValue(
+          order({
+            id: "order-1",
+            paymentStatus: "PAGO",
+            paidAt: new Date("2026-01-02T00:00:00.000Z"),
+            items: [item({ id: "item-1", totalCents: 1000 })],
+          }),
+        );
+
+        await expect(confirmPayment("order-1", "caixa-1")).rejects.toMatchObject({
+          code: "PAYMENT_ALREADY_CONFIRMED",
+        });
+
+        expect(publishRealtimeEvent).not.toHaveBeenCalled();
+      });
+
+      it("não publica nada quando perde a corrida da confirmação condicional", async () => {
+        vi.mocked(prisma.order.findUnique).mockResolvedValue(
+          order({
+            id: "order-1",
+            items: [item({ id: "item-1", totalCents: 1000, status: "PRONTO" })],
+          }),
+        );
+        vi.mocked(prisma.order.updateMany).mockResolvedValue({ count: 0 });
+
+        await expect(confirmPayment("order-1", "caixa-1")).rejects.toMatchObject({
+          code: "PAYMENT_ALREADY_CONFIRMED",
+        });
+
+        expect(publishRealtimeEvent).not.toHaveBeenCalled();
+      });
     });
   });
 });

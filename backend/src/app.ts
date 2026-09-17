@@ -10,6 +10,7 @@ import { productionRouter } from "./modules/production/production.routes.js";
 import { cashierRouter } from "./modules/cashier/cashier.routes.js";
 import { deliveryRouter } from "./modules/delivery/delivery.routes.js";
 import { historyRouter } from "./modules/history/history.routes.js";
+import { realtimeRouter } from "./modules/realtime/realtime.routes.js";
 import { notFoundHandler } from "./middlewares/notFoundHandler.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
@@ -34,6 +35,7 @@ export function createApp(corsOrigin: string) {
   app.use("/api/cashier", cashierRouter);
   app.use("/api/delivery", deliveryRouter);
   app.use("/api/history", historyRouter);
+  app.use("/api/realtime", realtimeRouter);
 
   // Os dois abaixo são sempre os últimos, nesta ordem.
   app.use(notFoundHandler);

@@ -2,6 +2,8 @@ import type { OrderItem, OrderItemAdditional, OrderItemStatus, Prisma, Station }
 import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
+import { publishRealtimeEvent } from "../realtime/realtime.service.js";
+import type { RealtimeScope } from "../realtime/realtime.types.js";
 
 const QUEUE_STATUSES: OrderItemStatus[] = ["PENDENTE", "EM_PREPARO"];
 
@@ -166,7 +168,7 @@ export async function advanceItem(
   itemId: string,
   userId: string,
 ): Promise<OrderItem & { additionals: OrderItemAdditional[] }> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const item = await tx.orderItem.findUnique({
       where: { id: itemId },
       include: {
@@ -245,4 +247,15 @@ export async function advanceItem(
 
     return updated;
   });
+
+  // Sempre production + orders. PRONTO também afeta Retirada/Entrega — é
+  // essa transição que torna o item elegível pra entrega (ver deliverItem).
+  const scopes: RealtimeScope[] = ["production", "orders"];
+  if (updated.status === "PRONTO") {
+    scopes.push("delivery");
+  }
+
+  publishRealtimeEvent({ scopes, orderId: updated.orderId, stationId });
+
+  return updated;
 }

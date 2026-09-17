@@ -4,6 +4,8 @@ import { useAuth } from "../auth/AuthContext.js";
 import { ApiError } from "../../services/apiClient.js";
 import { listProductionStations } from "./productionApi.js";
 import type { ProductionStation } from "./production.types.js";
+import { useRealtimeRefresh } from "../realtime/useRealtimeRefresh.js";
+import { RealtimeIndicator } from "../realtime/RealtimeIndicator.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Não foi possível conectar ao servidor.";
@@ -34,14 +36,22 @@ export default function ProductionStationsPage() {
     load();
   }, [load]);
 
+  // A lista de estações some/aparece conforme item entra ou sai da fila de
+  // preparo — qualquer evento de production pode mudar isso, não só os da
+  // estação que o operador tem aberta (não há estação aberta nesta tela).
+  const realtimeStatus = useRealtimeRefresh({ scopes: ["production"], onRefresh: load });
+
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 px-4 py-10">
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Preparo</h1>
-          <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
-            Voltar
-          </Link>
+          <div className="flex items-center gap-4">
+            <RealtimeIndicator status={realtimeStatus} />
+            <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
+              Voltar
+            </Link>
+          </div>
         </div>
 
         <p className="text-neutral-400">Escolha a estação para ver a fila de preparo.</p>

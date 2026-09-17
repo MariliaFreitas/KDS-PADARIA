@@ -19,8 +19,13 @@ vi.mock("../../../lib/prisma.js", () => ({
   },
 }));
 
+vi.mock("../../realtime/realtime.service.js", () => ({
+  publishRealtimeEvent: vi.fn(),
+}));
+
 import { prisma } from "../../../lib/prisma.js";
 import { deliverItem, listPendingDeliveryOrders } from "../delivery.service.js";
+import { publishRealtimeEvent } from "../../realtime/realtime.service.js";
 
 type ItemStatus = "PENDENTE" | "EM_PREPARO" | "PRONTO" | "CANCELADO";
 
@@ -651,6 +656,59 @@ describe("delivery.service", () => {
       await deliverItem("order-1", "item-1", "caixa-1");
 
       expect(prisma.$queryRaw).toHaveBeenCalled();
+    });
+
+    describe("eventos de tempo real", () => {
+      it("publica delivery+orders depois que o item é entregue", async () => {
+        vi.mocked(prisma.order.findUnique).mockResolvedValue(
+          order({ id: "order-1", items: [item({ id: "item-1" })] }),
+        );
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(
+          item({ id: "item-1", deliveredAt: new Date() }),
+        );
+
+        await deliverItem("order-1", "item-1", "caixa-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledTimes(1);
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["delivery", "orders"],
+          orderId: "order-1",
+        });
+      });
+
+      it("não publica nada quando a entrega é rejeitada (item já entregue)", async () => {
+        vi.mocked(prisma.order.findUnique).mockResolvedValue(
+          order({
+            id: "order-1",
+            items: [
+              item({
+                id: "item-1",
+                status: "PENDENTE",
+                deliveredAt: new Date("2026-01-02T00:00:00.000Z"),
+              }),
+            ],
+          }),
+        );
+
+        await expect(deliverItem("order-1", "item-1", "caixa-1")).rejects.toMatchObject({
+          code: "ORDER_ITEM_ALREADY_DELIVERED",
+        });
+
+        expect(publishRealtimeEvent).not.toHaveBeenCalled();
+      });
+
+      it("não publica nada quando perde a corrida da entrega condicional", async () => {
+        vi.mocked(prisma.order.findUnique).mockResolvedValue(
+          order({ id: "order-1", items: [item({ id: "item-1" })] }),
+        );
+        vi.mocked(prisma.orderItem.updateMany).mockResolvedValue({ count: 0 });
+
+        await expect(deliverItem("order-1", "item-1", "caixa-1")).rejects.toMatchObject({
+          code: "ORDER_ITEM_ALREADY_DELIVERED",
+        });
+
+        expect(publishRealtimeEvent).not.toHaveBeenCalled();
+      });
     });
   });
 });

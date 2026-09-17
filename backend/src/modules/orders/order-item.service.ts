@@ -3,6 +3,8 @@ import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
 import type { CreateOrderItemInput } from "./order-item.types.js";
+import { publishRealtimeEvent } from "../realtime/realtime.service.js";
+import type { RealtimeScope } from "../realtime/realtime.types.js";
 
 export type OrderItemWithAdditionals = OrderItem & { additionals: OrderItemAdditional[] };
 
@@ -319,8 +321,13 @@ export async function addOrderItem(
   // nenhuma inclusão de item consiga terminar depois de um pagamento que
   // já fechou a conta, mesmo com as duas operações chegando ao mesmo
   // tempo (ver confirmPayment, que trava a mesma linha do mesmo jeito).
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  // Capturado dentro da transação (via push) para decidir os escopos do
+  // evento depois do commit, sem precisar reconsultar o pedido.
+  const orderConsumptionTypes: Order["consumptionType"][] = [];
+
+  const createdItem = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     const order = await getOpenOrder(tx, orderId);
+    orderConsumptionTypes.push(order.consumptionType);
     const product = await getSellableProduct(tx, input.productId);
 
     const saleTypeFields = await resolveSaleTypeFields(tx, product, input);
@@ -368,4 +375,24 @@ export async function addOrderItem(
 
     return createdItem;
   });
+
+  // Sempre afeta Atendimento e Caixa. Item que exige produção afeta o
+  // Preparo — usa o snapshot de estação do item, nunca o cadastro atual do
+  // produto. Item sem produção num pedido LOCAL já é entregável na hora
+  // (ver deliverItem), então também afeta Retirada/Entrega; em pedido
+  // VIAGEM isso ainda depende do pagamento, então não afeta.
+  const scopes: RealtimeScope[] = ["orders", "cashier"];
+  if (createdItem.requiresProductionSnapshot) {
+    scopes.push("production");
+  } else if (orderConsumptionTypes[0] === "LOCAL") {
+    scopes.push("delivery");
+  }
+
+  publishRealtimeEvent({
+    scopes,
+    orderId,
+    ...(createdItem.stationIdSnapshot ? { stationId: createdItem.stationIdSnapshot } : {}),
+  });
+
+  return createdItem;
 }

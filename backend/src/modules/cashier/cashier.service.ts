@@ -3,6 +3,8 @@ import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
 import { scheduleServiceNumberReuse } from "../orders/service-number.service.js";
+import { publishRealtimeEvent } from "../realtime/realtime.service.js";
+import type { RealtimeScope } from "../realtime/realtime.types.js";
 
 export interface CashierOrderItemAdditional {
   nameSnapshot: string;
@@ -40,6 +42,21 @@ function billableItems<T extends OrderItem>(items: T[]): T[] {
 /** Soma só os itens que ainda contam para o total — item cancelado não entra na conta. */
 function billableTotalCents(items: OrderItem[]): number {
   return billableItems(items).reduce((sum, item) => sum + item.totalCents, 0);
+}
+
+/**
+ * Só WHATSAPP+VIAGEM trava item de produção enquanto o pagamento estiver
+ * pendente (ver BLOCKED_BY_UNPAID_WHATSAPP_TRAVEL em production.service.ts).
+ * Um item travado só pode estar PENDENTE — advanceItem já barra
+ * PENDENTE -> EM_PREPARO sem pagamento — então pagar libera exatamente
+ * esses itens para o Preparo.
+ */
+function paymentUnlocksProductionQueue(order: Order, items: OrderItem[]): boolean {
+  if (order.channel !== "WHATSAPP" || order.consumptionType !== "VIAGEM") {
+    return false;
+  }
+
+  return items.some((item) => item.requiresProductionSnapshot && item.status === "PENDENTE");
 }
 
 function toCashierOrder(order: OrderWithItems): CashierOrder {
@@ -127,7 +144,11 @@ export async function listOpenOrders(search?: string): Promise<CashierOrder[]> {
  * outra confirmação de pagamento concorrente.
  */
 export async function confirmPayment(orderId: string, userId: string): Promise<Order> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  // Capturado dentro da transação para decidir depois do commit se o
+  // pagamento libera a fila de produção.
+  const unlocksProduction: boolean[] = [];
+
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.$queryRaw`SELECT id FROM "orders" WHERE id = ${orderId} FOR UPDATE`;
 
     const order: OrderWithBillableItems | null = await tx.order.findUnique({
@@ -154,6 +175,8 @@ export async function confirmPayment(orderId: string, userId: string): Promise<O
         ErrorCode.PAYMENT_ALREADY_CONFIRMED,
       );
     }
+
+    unlocksProduction.push(paymentUnlocksProductionQueue(order, order.items));
 
     const totalCents = billableTotalCents(order.items);
     if (totalCents <= 0) {
@@ -209,4 +232,16 @@ export async function confirmPayment(orderId: string, userId: string): Promise<O
 
     return updated;
   });
+
+  // Sempre afeta Caixa, Atendimento e Retirada/Entrega. Só afeta Preparo
+  // quando o pagamento realmente destrava algum item — sem stationId, já
+  // que os itens do pedido podem estar em mais de uma estação.
+  const scopes: RealtimeScope[] = ["cashier", "orders", "delivery"];
+  if (unlocksProduction[0]) {
+    scopes.push("production");
+  }
+
+  publishRealtimeEvent({ scopes, orderId });
+
+  return result;
 }

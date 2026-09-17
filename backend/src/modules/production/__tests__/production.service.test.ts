@@ -20,8 +20,13 @@ vi.mock("../../../lib/prisma.js", () => ({
   },
 }));
 
+vi.mock("../../realtime/realtime.service.js", () => ({
+  publishRealtimeEvent: vi.fn(),
+}));
+
 import { prisma } from "../../../lib/prisma.js";
 import { advanceItem, getStationQueue, listProductionStations } from "../production.service.js";
+import { publishRealtimeEvent } from "../../realtime/realtime.service.js";
 
 interface StationFixture {
   id: string;
@@ -546,6 +551,58 @@ describe("production.service", () => {
         const result = await advanceItem("station-1", "item-1", "producao-1");
 
         expect(result.status).toBe("EM_PREPARO");
+      });
+    });
+
+    describe("eventos de tempo real", () => {
+      it("publica production+orders (sem delivery) ao avançar PENDENTE -> EM_PREPARO", async () => {
+        vi.mocked(prisma.orderItem.findUnique)
+          .mockResolvedValueOnce(item({ status: "PENDENTE" }))
+          .mockResolvedValueOnce(item({ status: "EM_PREPARO" }));
+
+        await advanceItem("station-1", "item-1", "producao-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledTimes(1);
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["production", "orders"],
+          orderId: "order-1",
+          stationId: "station-1",
+        });
+      });
+
+      it("também publica delivery ao avançar EM_PREPARO -> PRONTO (item passa a poder ser entregue)", async () => {
+        vi.mocked(prisma.orderItem.findUnique)
+          .mockResolvedValueOnce(item({ status: "EM_PREPARO" }))
+          .mockResolvedValueOnce(item({ status: "PRONTO" }));
+
+        await advanceItem("station-1", "item-1", "producao-1");
+
+        expect(publishRealtimeEvent).toHaveBeenCalledWith({
+          scopes: ["production", "orders", "delivery"],
+          orderId: "order-1",
+          stationId: "station-1",
+        });
+      });
+
+      it("não publica nada quando o avanço é rejeitado", async () => {
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValue(item({ status: "PRONTO" }));
+
+        await expect(
+          advanceItem("station-1", "item-1", "producao-1"),
+        ).rejects.toMatchObject({ code: "ORDER_ITEM_ADVANCE_NOT_ALLOWED" });
+
+        expect(publishRealtimeEvent).not.toHaveBeenCalled();
+      });
+
+      it("não publica nada quando perde a corrida da reivindicação condicional", async () => {
+        vi.mocked(prisma.orderItem.findUnique).mockResolvedValueOnce(item({ status: "PENDENTE" }));
+        vi.mocked(prisma.orderItem.updateMany).mockResolvedValue({ count: 0 });
+
+        await expect(
+          advanceItem("station-1", "item-1", "producao-1"),
+        ).rejects.toMatchObject({ code: "ORDER_ITEM_ADVANCE_NOT_ALLOWED" });
+
+        expect(publishRealtimeEvent).not.toHaveBeenCalled();
       });
     });
   });

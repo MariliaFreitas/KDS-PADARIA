@@ -13,9 +13,14 @@ vi.mock("../../../lib/prisma.js", () => ({
   },
 }));
 
+vi.mock("../../realtime/realtime.service.js", () => ({
+  publishRealtimeEvent: vi.fn(),
+}));
+
 import { prisma } from "../../../lib/prisma.js";
 import { addOrderItem } from "../order-item.service.js";
 import type { CreateOrderItemInput } from "../order-item.types.js";
+import { publishRealtimeEvent } from "../../realtime/realtime.service.js";
 
 /**
  * Constrói um input válido para addOrderItem já com observation: null (a
@@ -734,6 +739,76 @@ describe("order-item.service", () => {
         addOrderItem("order-1", item({ productId: "product-unit", quantity: 1 }), "user-1"),
       ).rejects.toMatchObject({ statusCode: 400, code: "STATION_NOT_AVAILABLE" });
       expect(prisma.orderItem.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("eventos de tempo real", () => {
+    it("publica orders+cashier+delivery para item sem produção num pedido LOCAL", async () => {
+      // openOrder é LOCAL — item sem produção fica imediatamente entregável
+      // (ver deliverItem, que não exige pagamento pra pedido LOCAL).
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(unitProduct);
+
+      await addOrderItem("order-1", item({ productId: "product-unit", quantity: 2 }), "user-1");
+
+      expect(publishRealtimeEvent).toHaveBeenCalledTimes(1);
+      expect(publishRealtimeEvent).toHaveBeenCalledWith({
+        scopes: ["orders", "cashier", "delivery"],
+        orderId: "order-1",
+      });
+    });
+
+    it("não publica delivery para item sem produção num pedido VIAGEM (ainda exige pagamento pra entregar)", async () => {
+      vi.mocked(prisma.order.findUnique).mockResolvedValue({
+        ...openOrder,
+        id: "order-travel",
+        channel: "WHATSAPP",
+        consumptionType: "VIAGEM",
+      });
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(unitProduct);
+      vi.mocked(prisma.orderItem.create).mockResolvedValue({
+        ...createdOrderItemFixture,
+        orderId: "order-travel",
+      });
+
+      await addOrderItem("order-travel", item({ productId: "product-unit", quantity: 1 }), "user-1");
+
+      expect(publishRealtimeEvent).toHaveBeenCalledWith({
+        scopes: ["orders", "cashier"],
+        orderId: "order-travel",
+      });
+    });
+
+    it("também publica production, com o stationId congelado no item, quando o item exige produção", async () => {
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(variationProduct);
+      vi.mocked(prisma.productVariation.findUnique).mockResolvedValue(variationFixture);
+      vi.mocked(prisma.orderItem.create).mockResolvedValue({
+        ...createdOrderItemFixture,
+        requiresProductionSnapshot: true,
+        stationIdSnapshot: "station-1",
+        stationNameSnapshot: "Confeitaria",
+      });
+
+      await addOrderItem(
+        "order-1",
+        item({ productId: "product-variation", quantity: 1, variationId: "variation-1" }),
+        "user-1",
+      );
+
+      expect(publishRealtimeEvent).toHaveBeenCalledWith({
+        scopes: ["orders", "cashier", "production"],
+        orderId: "order-1",
+        stationId: "station-1",
+      });
+    });
+
+    it("não publica nada quando a inclusão do item falha", async () => {
+      vi.mocked(prisma.product.findUnique).mockResolvedValue(null);
+
+      await expect(
+        addOrderItem("order-1", item({ productId: "inexistente", quantity: 1 }), "user-1"),
+      ).rejects.toMatchObject({ code: "PRODUCT_NOT_FOUND" });
+
+      expect(publishRealtimeEvent).not.toHaveBeenCalled();
     });
   });
 });

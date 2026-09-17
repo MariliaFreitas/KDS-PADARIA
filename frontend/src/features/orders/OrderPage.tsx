@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.js";
 import { ApiError } from "../../services/apiClient.js";
 import { getOrder } from "./ordersService.js";
 import type { ConsumptionType, OrderChannel, OrderItem, OrderWithItems } from "./types.js";
+import { useRealtimeRefresh } from "../realtime/useRealtimeRefresh.js";
+import { RealtimeIndicator } from "../realtime/RealtimeIndicator.js";
 
 const CHANNEL_LABEL: Record<OrderChannel, string> = {
   BALCAO: "Balcão",
@@ -76,28 +78,53 @@ export default function OrderPage() {
     return err instanceof ApiError ? err.message : "Não foi possível conectar ao servidor.";
   }
 
+  // load() é chamado tanto pelo carregamento normal quanto pelo refetch do
+  // realtime — um contador de requisição cobre resposta obsoleta (trocou
+  // de pedido, ou componente já desmontou) nos dois casos.
+  const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
+
   useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const load = useCallback(async () => {
     if (!token || !orderId) return;
 
-    let cancelled = false;
+    const requestId = (requestIdRef.current += 1);
+    const isStillCurrent = () => isMountedRef.current && requestIdRef.current === requestId;
+
     setLoading(true);
     setError(null);
-
-    getOrder(token, orderId)
-      .then((result) => {
-        if (!cancelled) setOrder(result);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(errorMessage(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const result = await getOrder(token, orderId);
+      if (!isStillCurrent()) return;
+      setOrder(result);
+    } catch (err) {
+      if (!isStillCurrent()) return;
+      setError(errorMessage(err));
+    } finally {
+      if (isStillCurrent()) {
+        setLoading(false);
+      }
+    }
   }, [token, orderId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Só refaz o GET quando o evento é deste pedido (ou não é de nenhum
+  // pedido específico) — evento de outro pedido não deveria disparar
+  // refetch aqui.
+  const realtimeStatus = useRealtimeRefresh({
+    scopes: ["orders"],
+    shouldRefresh: (event) => !event.orderId || event.orderId === orderId,
+    onRefresh: load,
+  });
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100 px-4 py-10">
@@ -115,6 +142,10 @@ export default function OrderPage() {
 
         {!loading && !error && order && (
           <>
+            <div className="flex justify-end">
+              <RealtimeIndicator status={realtimeStatus} />
+            </div>
+
             <div>
               <h1 className="text-2xl font-semibold">Pedido #{order.serviceNumber}</h1>
               <p className="text-neutral-300">{order.customerName}</p>

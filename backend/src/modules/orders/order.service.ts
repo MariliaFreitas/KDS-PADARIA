@@ -4,6 +4,7 @@ import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
 import type { CreateOrderInput } from "./order.types.js";
 import { allocateServiceNumber } from "./service-number.service.js";
+import { publishRealtimeEvent } from "../realtime/realtime.service.js";
 
 export type OrderWithItems = Order & {
   items: (OrderItem & { additionals: OrderItemAdditional[] })[];
@@ -56,7 +57,7 @@ export async function createOrder(
 ): Promise<Order> {
   for (let attempt = 1; attempt <= MAX_CREATE_ATTEMPTS; attempt += 1) {
     try {
-      return await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const created = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const order = await tx.order.create({
           data: {
             customerName: input.customerName,
@@ -87,6 +88,13 @@ export async function createOrder(
 
         return updated;
       });
+
+      // Pedido criado: também afeta o Caixa — listOpenOrders lista
+      // qualquer pedido com paymentStatus=PENDENTE, mesmo sem item nenhum
+      // ainda. Só publica depois que a transação acima já commitou.
+      publishRealtimeEvent({ scopes: ["orders", "cashier"], orderId: created.id });
+
+      return created;
     } catch (error) {
       const isLastAttempt = attempt === MAX_CREATE_ATTEMPTS;
       if (!isUniqueConstraintViolation(error) || isLastAttempt) {

@@ -2,6 +2,7 @@ import type { Order, OrderItem, OrderItemAdditional, OrderItemStatus, Prisma } f
 import { prisma } from "../../lib/prisma.js";
 import { AppError } from "../../lib/app-error.js";
 import { ErrorCode } from "../../lib/error-codes.js";
+import { publishRealtimeEvent } from "../realtime/realtime.service.js";
 
 export interface DeliveryOrderItemAdditional {
   nameSnapshot: string;
@@ -157,7 +158,7 @@ export async function deliverItem(
   itemId: string,
   userId: string,
 ): Promise<OrderItem> {
-  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+  const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await lockOrderForUpdate(tx, orderId);
 
     // Aqui a query só inclui items (sem additionals) — deliverItem nunca
@@ -286,4 +287,10 @@ export async function deliverItem(
 
     return updated;
   });
+
+  // Item retirado/entregue: afeta a própria tela de Retirada/Entrega e o
+  // Atendimento (status do item mudou).
+  publishRealtimeEvent({ scopes: ["delivery", "orders"], orderId });
+
+  return result;
 }

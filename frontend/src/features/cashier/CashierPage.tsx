@@ -5,6 +5,8 @@ import { ApiError } from "../../services/apiClient.js";
 import { confirmPayment as requestConfirmPayment, listCashierOrders } from "./cashierApi.js";
 import { CashierOrderCard } from "./CashierOrderCard.js";
 import type { CashierOrder } from "./cashier.types.js";
+import { useRealtimeRefresh } from "../realtime/useRealtimeRefresh.js";
+import { RealtimeIndicator } from "../realtime/RealtimeIndicator.js";
 
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Não foi possível conectar ao servidor.";
@@ -37,6 +39,10 @@ export default function CashierPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // load() já fecha sobre o filtro de busca atual (search), então o
+  // refetch automático mantém a busca ativa sozinho.
+  const realtimeStatus = useRealtimeRefresh({ scopes: ["cashier"], onRefresh: load });
 
   function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
@@ -74,9 +80,12 @@ export default function CashierPage() {
       <div className="max-w-2xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Caixa</h1>
-          <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
-            Voltar
-          </Link>
+          <div className="flex items-center gap-4">
+            <RealtimeIndicator status={realtimeStatus} />
+            <Link to="/" className="text-sm text-neutral-400 hover:text-neutral-200">
+              Voltar
+            </Link>
+          </div>
         </div>
 
         <form onSubmit={handleSearchSubmit} className="flex gap-3">

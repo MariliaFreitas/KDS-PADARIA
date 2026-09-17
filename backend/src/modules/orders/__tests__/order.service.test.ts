@@ -19,8 +19,13 @@ vi.mock("../../../lib/prisma.js", () => ({
   },
 }));
 
+vi.mock("../../realtime/realtime.service.js", () => ({
+  publishRealtimeEvent: vi.fn(),
+}));
+
 import { prisma } from "../../../lib/prisma.js";
 import { createOrder, getOrderById } from "../order.service.js";
+import { publishRealtimeEvent } from "../../realtime/realtime.service.js";
 
 function uniqueConstraintError(): Error & { code: string } {
   return Object.assign(new Error("Unique constraint failed on the fields: (`number`)"), {
@@ -284,6 +289,45 @@ describe("order.service", () => {
         ),
       ).rejects.toThrow("Falha de conexão");
       expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("eventos de tempo real", () => {
+    beforeEach(() => {
+      vi.mocked(prisma.serviceNumberSlot.findFirst).mockResolvedValue(null);
+      vi.mocked(prisma.serviceNumberSlot.create).mockResolvedValue({
+        id: "slot-1",
+        number: 1,
+        orderId: "order-1",
+        reusableAt: null,
+      });
+      vi.mocked(prisma.order.update).mockResolvedValue({ ...baseOrder, serviceNumber: 1 });
+    });
+
+    it("publica orders+cashier depois que o pedido foi criado", async () => {
+      const result = await createOrder(
+        { customerName: "Maria", channel: "BALCAO", consumptionType: "LOCAL", pickupTime: null },
+        "user-1",
+      );
+
+      expect(publishRealtimeEvent).toHaveBeenCalledTimes(1);
+      expect(publishRealtimeEvent).toHaveBeenCalledWith({
+        scopes: ["orders", "cashier"],
+        orderId: result.id,
+      });
+    });
+
+    it("não publica nada quando todas as tentativas de alocação se esgotam", async () => {
+      vi.mocked(prisma.serviceNumberSlot.create).mockRejectedValue(uniqueConstraintError());
+
+      await expect(
+        createOrder(
+          { customerName: "Maria", channel: "BALCAO", consumptionType: "LOCAL", pickupTime: null },
+          "user-1",
+        ),
+      ).rejects.toMatchObject({ code: "P2002" });
+
+      expect(publishRealtimeEvent).not.toHaveBeenCalled();
     });
   });
 
