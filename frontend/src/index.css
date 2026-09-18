@@ -1,3 +1,23 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --brand-primary: #84b83a;
+  --brand-dark: #41691f;
+  --brand-light: #ddefc7;
+  --brand-soft: #f1f7e9;
+
+  --surface: #ffffff;
+  --background: #f7f6f1;
+
+  --text-primary: #20231f;
+  --text-secondary: #71766e;
+  --border-color: #e1e5dc;
+
+  --status-waiting: #f3a72f;
+  --status-preparing: #4384d8;
+  --status-ready: #24966a;
+  --status-danger: #d9534f;
+  --status-neutral: #8b918a;
+}
